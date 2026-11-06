@@ -1118,11 +1118,24 @@ class FlowBrowserDriver:
             btn.scroll_into_view_if_needed(timeout=3_000)
             human_click(page, btn, delay_before=self._pace.click_delay())
         except PlaywrightError as e:
+            if self._page_gone(page, e):
+                # tab / cửa sổ Flow bị đóng giữa chừng: không phải lỗi của prompt, dừng phim chờ người dùng mở lại
+                raise PausedByUser("Tab Flow đã bị đóng trong lúc chờ kết quả: mở lại Chrome + tab Flow rồi bấm Chạy") from e
             log.warning("Không bấm được nút thử lại trên ô lỗi: %s", str(e)[:200])
             return False
         log.info("Ô lỗi trên Flow: đã bấm ↻ thử lại (%s)", key[:160])
         page.wait_for_timeout(1_500)
         return True
+
+    @staticmethod
+    def _page_gone(page, e: Exception | None = None) -> bool:
+        """Tab / cửa sổ đã đóng (người dùng đóng Chrome, tab bị tắt)."""
+        if e is not None and "has been closed" in str(e):
+            return True
+        try:
+            return bool(page.is_closed())
+        except Exception:  # noqa: BLE001
+            return False
 
     @classmethod
     def _raise_if_error_tile(cls, page, s: dict, before: Counter):

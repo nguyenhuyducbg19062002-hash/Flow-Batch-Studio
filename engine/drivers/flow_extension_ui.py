@@ -92,10 +92,7 @@ class FlowExtensionUiDriver(FlowBrowserDriver):
         """Context Playwright trỏ vào tab Flow của người dùng (không mở trình duyệt mới, không đóng tab khi xong)."""
         pw = sync_playwright().start()
         try:
-            try:
-                browser = pw.chromium.connect_over_cdp(bridge.CDP_URL, timeout=60_000)
-            except PlaywrightError as e:
-                raise TransientError(f"Không điều khiển được tab Flow qua extension: {str(e)[:300]}") from e
+            browser = self._connect(pw)
             try:
                 ctx = browser.contexts[0] if browser.contexts else None
                 if ctx is None or not ctx.pages:
@@ -108,6 +105,30 @@ class FlowExtensionUiDriver(FlowBrowserDriver):
                     pass
         finally:
             pw.stop()
+
+    # Chrome không còn cửa sổ nào / không có tab Flow: chờ người dùng mở lại một lúc rồi mới dừng phim (không đốt lượt thử)
+    NO_WINDOW_WAIT_S = int(os.environ.get("AVS_FLOW_NO_WINDOW_WAIT_S", "45"))
+    _NO_WINDOW_MARKS = ("no current window", "no_flow_tab", "no tab with id", "target closed", "target_closed",
+                        "has been closed")
+
+    @classmethod
+    def _connect(cls, pw):
+        started = time.monotonic()
+        logged = False
+        while True:
+            try:
+                return pw.chromium.connect_over_cdp(bridge.CDP_URL, timeout=60_000)
+            except PlaywrightError as e:
+                msg = str(e)
+                if not any(m in msg.lower() for m in cls._NO_WINDOW_MARKS):
+                    raise TransientError(f"Không điều khiển được tab Flow qua extension: {msg[:300]}") from e
+                if time.monotonic() - started > cls.NO_WINDOW_WAIT_S:
+                    raise PausedByUser("Chrome không còn cửa sổ / tab Flow (đã bị đóng?): mở Chrome, mở tab "
+                                       "flow.google.com đã đăng nhập rồi bấm Chạy") from e
+                if not logged:
+                    logged = True
+                    log.warning("Chrome không còn cửa sổ / tab Flow: chờ mở lại (%ss)…", cls.NO_WINDOW_WAIT_S)
+                time.sleep(5)
 
     def _open_flow(self, ctx, job: dict):
         page = ctx.pages[0]
