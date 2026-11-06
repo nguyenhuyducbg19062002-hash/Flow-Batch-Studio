@@ -1,0 +1,62 @@
+{
+  "_huong_dan": "Selector của Google Flow (flow.google.com, giao diện 11/2026). Giá trị TODO = chưa xác nhận. Các giá trị KHÔNG phải TODO đã được đọc trực tiếp trên trang Flow thật ngày 2026-11-03. Ghi thêm bằng: python -m playwright codegen --channel chrome https://flow.google.com/",
+  "_da_xac_nhan": "Đã chạy thật 2026-11-03. Tài khoản giao diện tiếng Việt, bố cục Tác nhân: tạo 1 ảnh PANEL-1 + tải về. Tài khoản giao diện tiếng Anh, bố cục tạo trực tiếp: đọc nút (Settings trigger, Add ingredients…, Upload media, Start generation), chưa tạo. Mỗi selector ghi cả 2 ngôn ngữ, cách nhau bằng dấu phẩy. Đã đọc (chưa bấm tạo): popover chọn độ phân giải / độ dài video. Chưa thử: tạo video thật, thông báo hết lượt / vi phạm.",
+  "new_project_button": "button:has-text('Dự án mới'), button:has-text('New project')",
+  "mode_buttons": {
+    "IMAGE": "TODO",
+    "VIDEO": "TODO"
+  },
+  "settings_button": "[aria-label='Settings trigger'], [aria-label='Cài đặt'], [aria-label='Trình kích hoạt cài đặt']",
+  "settings_save": "button:has-text('Lưu'), button:has-text('Save')",
+  "agent_never_confirm": "^\\s*(Không bao giờ|Never)(\\s|$)",
+  "add_reference_button": "[aria-label='Thêm thành phần vào ô nhập câu lệnh'], [aria-label='Add ingredients to the prompt box']",
+  "upload_button": "button:has-text('Tải nội dung nghe nhìn lên'), button:has-text('Upload media')",
+  "uploading_texts": [
+    "Đang tải lên",
+    "Uploading"
+  ],
+  "ingredient_search": "input[placeholder='Tìm kiếm thành phần'], input[placeholder='Search assets']",
+  "ingredient_listbox": "[role=listbox][aria-label='Danh sách thành phần'], [role=listbox]:has(button[role=option])",
+  "ingredient_option": "button[role=option]",
+  "prompt_box": "div[role='textbox'][contenteditable='true']",
+  "generate_button": "[aria-label='Bắt đầu tạo'], [aria-label='Start generation']",
+  "agent_reply_marker": "[aria-label='Câu trả lời tốt'], [aria-label='Good response']",
+  "agent_auto_reply": "Yes, proceed exactly as planned. Generate it now.",
+  "result_card": "flow-grid-tile-container",
+  "result_media": "[data-media-id]",
+  "tile_menu_button": "[aria-label='Tuỳ chọn khác'], [aria-label='More options']",
+  "download_menu_item": "[role=menuitem]:has-text('download')",
+  "download_quality_option": "[role=menuitem]:not([disabled]):has(.label:text-is('{quality}'))",
+  "image_download_quality": "1K",
+  "_ghi_chu_popover": "2026-11-04 (tài khoản tiếng Anh, bố cục tạo trực tiếp): popover mở từ nút Settings trigger gồm các radio Image/Video, Frames/Ingredients, 16:9/9:16, 360p/720p, 4s/6s/8s/10s, x1-x4 và dòng 'Generating will use N credits'. Driver chọn độ phân giải + độ dài trong _apply_settings bằng get_by_role('radio'), không cần selector riêng.",
+  "quota_texts": [
+    "Bạn đã hết tín dụng",
+    "không đủ tín dụng",
+    "Không đủ tín dụng",
+    "đã đạt đến giới hạn",
+    "đã đạt giới hạn",
+    "đã hết hạn mức",
+    "out of credits",
+    "Not enough credits",
+    "not enough credits",
+    "reached your limit",
+    "reached the limit",
+    "daily limit",
+    "quota exceeded"
+  ],
+  "suspicious_texts": [
+    "unusual activity",
+    "hoạt động bất thường"
+  ],
+  "policy_texts": [
+    "vi phạm chính sách",
+    "không thể tạo nội dung này",
+    "violates our policies",
+    "violate our policies",
+    "might violate",
+    "can't generate this",
+    "couldn't generate"
+  ],
+  "_ghi_chu_thong_bao": "quota_texts / policy_texts: câu đoán theo cách Flow thường viết, CHƯA thấy tận mắt. Gặp thông báo thật thì chép nguyên văn vào đây. Ở chế độ Mở Flow có nút \"Tài khoản hết lượt → đổi tài khoản\".",
+  "edit_prompt_box": "[role=textbox][aria-label^='Describe how to edit'], [role=textbox][aria-label^='Mô tả cách chỉnh sửa'], [role=textbox][contenteditable=true]"
+}

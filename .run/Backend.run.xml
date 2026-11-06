@@ -1,0 +1,17 @@
+<component name="ProjectRunConfigurationManager">
+  <!--
+    Chạy backend trong IntelliJ (bản Community cũng dùng được).
+    - Working directory = thư mục gốc dự án: backend tìm engine\worker_main.py ở đây để bật worker Python.
+    - Dữ liệu thử nghiệm ở <dự án>\data (đã gitignore), tách khỏi dữ liệu của bản exe (%LOCALAPPDATA%\FlowBatchStudio).
+    - Không tự mở trình duyệt: khi phát triển giao diện, mở http://localhost:5173 (npm run dev).
+  -->
+  <configuration default="false" name="Backend" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.aifilm.automation.AiFlowAutomationApplication" />
+    <module name="ai-flow-automation" />
+    <option name="VM_PARAMETERS" value="-Dfile.encoding=UTF-8 -Dafm.noBrowser=true -Dafm.data.dir=$PROJECT_DIR$/data" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

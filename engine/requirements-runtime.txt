@@ -1,0 +1,5 @@
+# Thư viện worker cần khi chạy (đóng gói vào python\Lib\site-packages).
+# Ghim đúng phiên bản đã test trên máy build; cập nhật bằng: python -m pip freeze
+playwright==1.64.1
+requests==2.32.3
+websockets==15.0.1

@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Flow Batch Studio – Flow Bridge",
+  "version": "0.3.0",
+  "description": "Nhận lệnh từ app Flow Batch Studio trên máy: điền prompt, ảnh và tạo ảnh / video trong tab flow.google.com đã đăng nhập.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs",
+    "scripting",
+    "debugger",
+    "downloads",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://flow.google.com/*",
+    "https://flow-content.google/*",
+    "https://labs.google/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://flow.google.com/*",
+        "https://labs.google/fx/tools/flow*",
+        "https://labs.google/fx/*/tools/flow*"
+      ],
+      "js": [
+        "hijack_bypass.js",
+        "recaptcha_enterprise.js",
+        "recaptcha__en.js",
+        "injected.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://flow.google.com/*",
+        "https://labs.google/fx/tools/flow*",
+        "https://labs.google/fx/*/tools/flow*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Flow Batch Studio – Flow Bridge: bấm để mở bảng quản lý"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  }
+}

@@ -1,0 +1,30 @@
+server:
+  # Chỉ nghe trên máy này: máy khác cùng mạng LAN không gọi được API (danh sách tài khoản, đường dẫn file).
+  address: 127.0.0.1
+  port: 8082
+
+spring:
+  application:
+    name: ai-film-maker
+  datasource:
+    # ${afm.data} do AppPaths.init() đặt: %LOCALAPPDATA%/FlowBatchStudio
+    url: jdbc:sqlite:${afm.data}/database.db?journal_mode=WAL&busy_timeout=10000&foreign_keys=true
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      # SQLite chỉ cho một nơi ghi tại một thời điểm; nhiều kết nối song song gây SQLITE_BUSY_SNAPSHOT khi
+      # worker báo kết quả cùng lúc. Một kết nối = mọi transaction xếp hàng, đủ nhanh cho app một máy.
+      maximum-pool-size: 1
+      connection-timeout: 60000
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  servlet:
+    multipart:
+      max-file-size: 2GB
+      max-request-size: 2GB
+
+logging:
+  config: classpath:logback-spring.xml

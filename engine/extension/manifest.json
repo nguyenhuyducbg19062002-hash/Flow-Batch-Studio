@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "AVS Anti-Detect (KHÔNG cài tay – app tự nạp)",
+  "version": "1.0.0",
+  "description": "Chỉ dùng cho cửa sổ trình duyệt do app tự mở (Google Flow trình duyệt). Muốn dùng 'Google Flow qua Extension' thì cài thư mục engine/flow_ext/extension.",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.google.com/*",
+        "*://flow.google.com/*",
+        "*://*/*"
+      ],
+      "js": [
+        "content_main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "*://*.google.com/*",
+        "*://flow.google.com/*",
+        "*://*/*"
+      ],
+      "js": [
+        "content_isolated.js"
+      ],
+      "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": true
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage"
+  ]
+}
