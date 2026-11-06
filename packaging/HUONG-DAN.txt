@@ -1,72 +1,146 @@
-﻿FLOW BATCH STUDIO - HƯỚNG DẪN CÀI ĐẶT VÀ SỬ DỤNG
-=================================================
-
-Tạo ảnh và video hàng loạt trên Google Flow. App tự dán prompt, gắn ảnh @tag, bấm Tạo, tải kết quả về thư mục
-chờ duyệt (1.png, 2.png...). Bạn duyệt, đánh dấu ảnh lỗi để làm lại, rồi bấm "Đổi tên" để chuyển sang tên đúng.
-
-Yêu cầu: Windows 10/11 64-bit, Google Chrome, tài khoản Google dùng được Google Flow (flow.google.com).
-
-
-1. CÀI APP
-----------
-- Chạy FlowBatchStudio-Setup-1.0.0.exe -> Next -> Install. Mặc định cài vào C:\FlowBatchStudio
-  (thư mục cài KHÔNG được có chữ có dấu).
-- Windows hiện màn hình xanh "Windows đã bảo vệ PC của bạn" (SmartScreen): bấm "Thông tin bổ sung" (More info)
-  -> "Vẫn chạy" (Run anyway). Bộ cài chưa ký số nên Windows 10/11 cảnh báo, không phải virus.
-- Windows 10: cần bản 64-bit. Máy có Microsoft Edge thì app mở trong cửa sổ Edge, không có Edge thì mở bằng Chrome.
-- Mở app bằng biểu tượng "Flow Batch Studio" ngoài Desktop / Start menu. App mở trong cửa sổ riêng.
-
-
-2. CÀI EXTENSION CHROME (một lần)
----------------------------------
-- Start menu -> "Flow Batch Studio - Extension Chrome": mở thư mục extension
-  (C:\FlowBatchStudio\engine\flow_ext\extension).
-- Mở Chrome, gõ vào thanh địa chỉ:  chrome://extensions
-- Bật "Chế độ dành cho nhà phát triển" (Developer mode) ở góc phải trên.
-- Bấm "Tải tiện ích đã giải nén" (Load unpacked) -> chọn đúng thư mục extension ở trên.
-- Ghim extension "Flow Batch Studio – Flow Bridge" lên thanh công cụ; biểu tượng hiện ON khi đã nối với app.
-- Chrome -> Cài đặt -> Tải xuống: TẮT "Hỏi vị trí lưu từng tệp trước khi tải xuống".
-- Mở https://flow.google.com , đăng nhập Google. Chỉ để MỘT tab Flow.
-- Không thao tác trên tab Flow khi app đang chạy. Dòng "... đã bắt đầu gỡ lỗi trình duyệt này" của Chrome là bình thường.
-
-
-3. TẠO PHIM
------------
-- Trang "Phim" -> "Thêm phim mới":
-  + Folder Ảnh: nơi chứa ảnh tham chiếu đã duyệt (ví dụ ...\Tập 6\Ảnh tham chiếu)
-  + Folder Video: nơi chứa video đã duyệt (ví dụ ...\Tập 6\phim)
-  + Nền tảng: Google Flow qua Extension.  Chế độ: Chạy ngầm.  Tỉ lệ khung: 16:9 (hoặc theo phim)
-- "Nạp cả thư mục phim" để nạp một lần reference-prompts.xlsx, all-video-prompts.xlsx và ảnh có sẵn.
-
-
-4. CÀI ĐẶT (trang "Cài đặt", bấm Lưu)
--------------------------------------
-- Model ảnh trên Flow: ví dụ  Nano Banana 2.1      Thinking level: Low
-- Model video trên Flow: ví dụ  Veo 3.1 - Fast     (ghi đúng tên như Flow hiển thị; để trống = giữ model đang chọn)
-- Tốc độ thao tác: "Vừa, như người thật" (Flow hay báo "hoạt động bất thường" thì chọn Chậm)
-- Số lần bấm ↻ khi Flow báo lỗi: 10.   Flow nghi ngờ: nghỉ 30 - 45 phút.
-
-
-5. TẠO ẢNH (màn "Tạo ảnh")
--------------------------
-1) Bấm "Chạy tạo ảnh". Ảnh về thư mục "Ảnh chờ duyệt" (1.png, 2.png...), đúng thứ tự file Excel.
-   Ảnh đổi đồ (OUTFIT VARIANT) chờ ảnh gốc được duyệt trước.
-2) Duyệt ở khu "Duyệt nhanh": bấm vào ảnh sai để đánh dấu Lỗi -> "Làm lại N ảnh lỗi" (có thể ghi chú cần sửa).
-   Hoặc trong Explorer: kéo file sai vào thư mục con "lỗi" -> app tự làm lại số đó.
-3) Ổn hết: bấm "Duyệt hết" -> ảnh đổi sang tên đúng (CHAR-CLARA-1.png...) và chuyển vào Folder Ảnh.
-   Ảnh đổi đồ đang chờ sẽ tự chạy tiếp; duyệt lượt 2 như trên.
-   Chỉ ảnh trong Folder Ảnh mới được dùng để gắn @tag.
-
-
-6. TẠO VIDEO (màn "Tạo video")
------------------------------
-Giống hệt phần ảnh: "Chạy tạo video" -> thư mục "Video chờ duyệt" (1.mp4...) -> đánh dấu lỗi / làm lại ->
-"Duyệt hết" -> video đổi tên (EP06-S1-01.mp4...) và chuyển vào Folder Video.
-Video tự upload ảnh @ID từ Folder Ảnh, nên phải duyệt xong ảnh trước.
-
-
-GHI CHÚ
--------
-- Dữ liệu app (database, log) nằm ở %LOCALAPPDATA%\FlowBatchStudio. Gỡ cài đặt không xóa thư mục này.
-- Lỗi / log: Cài đặt -> mở thư mục Log, gửi file app.log và worker-py-*.log cho người hỗ trợ.
-- Tắt app: nút "Thoát ứng dụng" ở góc trái dưới (hoặc đóng cửa sổ app).
+﻿FLOW BATCH STUDIO - HƯỚNG DẪN CÀI ĐẶT VÀ SỬ DỤNG
+
+=================================================
+
+
+
+Tạo ảnh và video hàng loạt trên Google Flow. App tự dán prompt, gắn ảnh @tag, bấm Tạo, tải kết quả về thư mục
+
+chờ duyệt (1.png, 2.png...). Bạn duyệt, đánh dấu ảnh lỗi để làm lại, rồi bấm "Đổi tên" để chuyển sang tên đúng.
+
+
+
+Yêu cầu: Windows 10/11 64-bit, Google Chrome, tài khoản Google dùng được Google Flow (flow.google.com).
+
+
+
+
+
+1. CÀI APP
+
+----------
+
+- Chạy FlowBatchStudio-Setup-1.0.0.exe -> Next -> Install. Mặc định cài vào C:\FlowBatchStudio
+
+  (thư mục cài KHÔNG được có chữ có dấu).
+
+- Windows hiện màn hình xanh "Windows đã bảo vệ PC của bạn" (SmartScreen): bấm "Thông tin bổ sung" (More info)
+
+  -> "Vẫn chạy" (Run anyway). Bộ cài chưa ký số nên Windows 10/11 cảnh báo, không phải virus.
+
+- Windows 10: cần bản 64-bit. Máy có Microsoft Edge thì app mở trong cửa sổ Edge, không có Edge thì mở bằng Chrome.
+
+- Mở app bằng biểu tượng "Flow Batch Studio" ngoài Desktop / Start menu. App mở trong cửa sổ riêng.
+
+
+
+
+
+2. CÀI EXTENSION CHROME (một lần)
+
+---------------------------------
+
+- Start menu -> "Flow Batch Studio - Extension Chrome": mở thư mục extension
+
+  (C:\FlowBatchStudio\engine\flow_ext\extension).
+
+- Mở Chrome, gõ vào thanh địa chỉ:  chrome://extensions
+
+- Bật "Chế độ dành cho nhà phát triển" (Developer mode) ở góc phải trên.
+
+- Bấm "Tải tiện ích đã giải nén" (Load unpacked) -> chọn đúng thư mục extension ở trên.
+
+- Ghim extension "Flow Batch Studio – Flow Bridge" lên thanh công cụ; biểu tượng hiện ON khi đã nối với app.
+
+- Chrome -> Cài đặt -> Tải xuống: nên TẮT "Hỏi vị trí lưu từng tệp trước khi tải xuống". Nếu vẫn bật (hay gặp
+  trên Windows 10), extension 0.3.1 trở lên tự lưu file, không hiện hộp "Save As" nữa.
+- Chrome hỏi "flow.google.com muốn tải nhiều tệp" (Download multiple files): bấm "Cho phép" (Allow) một lần.
+
+- Mở https://flow.google.com , đăng nhập Google. Chỉ để MỘT tab Flow.
+
+- Không thao tác trên tab Flow khi app đang chạy. Dòng "... đã bắt đầu gỡ lỗi trình duyệt này" của Chrome là bình thường.
+
+
+
+
+
+3. TẠO PHIM
+
+-----------
+
+- Trang "Phim" -> "Thêm phim mới":
+
+  + Folder Ảnh: nơi chứa ảnh tham chiếu đã duyệt (ví dụ ...\Tập 6\Ảnh tham chiếu)
+
+  + Folder Video: nơi chứa video đã duyệt (ví dụ ...\Tập 6\phim)
+
+  + Nền tảng: Google Flow qua Extension.  Chế độ: Chạy ngầm.  Tỉ lệ khung: 16:9 (hoặc theo phim)
+
+- "Nạp cả thư mục phim" để nạp một lần reference-prompts.xlsx, all-video-prompts.xlsx và ảnh có sẵn.
+
+
+
+
+
+4. CÀI ĐẶT (trang "Cài đặt", bấm Lưu)
+
+-------------------------------------
+
+- Model ảnh trên Flow: ví dụ  Nano Banana 2.1      Thinking level: Low
+
+- Model video trên Flow: ví dụ  Veo 3.1 - Fast     (ghi đúng tên như Flow hiển thị; để trống = giữ model đang chọn)
+
+- Tốc độ thao tác: "Vừa, như người thật" (Flow hay báo "hoạt động bất thường" thì chọn Chậm)
+
+- Số lần bấm ↻ khi Flow báo lỗi: 10.   Flow nghi ngờ: nghỉ 30 - 45 phút.
+
+
+
+
+
+5. TẠO ẢNH (màn "Tạo ảnh")
+
+-------------------------
+
+1) Bấm "Chạy tạo ảnh". Ảnh về thư mục "Ảnh chờ duyệt" (1.png, 2.png...), đúng thứ tự file Excel.
+
+   Ảnh đổi đồ (OUTFIT VARIANT) chờ ảnh gốc được duyệt trước.
+
+2) Duyệt ở khu "Duyệt nhanh": bấm vào ảnh sai để đánh dấu Lỗi -> "Làm lại N ảnh lỗi" (có thể ghi chú cần sửa).
+
+   Hoặc trong Explorer: kéo file sai vào thư mục con "lỗi" -> app tự làm lại số đó.
+
+3) Ổn hết: bấm "Duyệt hết" -> ảnh đổi sang tên đúng (CHAR-CLARA-1.png...) và chuyển vào Folder Ảnh.
+
+   Ảnh đổi đồ đang chờ sẽ tự chạy tiếp; duyệt lượt 2 như trên.
+
+   Chỉ ảnh trong Folder Ảnh mới được dùng để gắn @tag.
+
+
+
+
+
+6. TẠO VIDEO (màn "Tạo video")
+
+-----------------------------
+
+Giống hệt phần ảnh: "Chạy tạo video" -> thư mục "Video chờ duyệt" (1.mp4...) -> đánh dấu lỗi / làm lại ->
+
+"Duyệt hết" -> video đổi tên (EP06-S1-01.mp4...) và chuyển vào Folder Video.
+
+Video tự upload ảnh @ID từ Folder Ảnh, nên phải duyệt xong ảnh trước.
+
+
+
+
+
+GHI CHÚ
+
+-------
+
+- Dữ liệu app (database, log) nằm ở %LOCALAPPDATA%\FlowBatchStudio. Gỡ cài đặt không xóa thư mục này.
+
+- Lỗi / log: Cài đặt -> mở thư mục Log, gửi file app.log và worker-py-*.log cho người hỗ trợ.
+
+- Tắt app: nút "Thoát ứng dụng" ở góc trái dưới (hoặc đóng cửa sổ app).
+

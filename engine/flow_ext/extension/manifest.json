@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Flow Batch Studio – Flow Bridge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Nhận lệnh từ app Flow Batch Studio trên máy: điền prompt, ảnh và tạo ảnh / video trong tab flow.google.com đã đăng nhập.",
   "permissions": [
     "storage",

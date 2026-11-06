@@ -298,6 +298,65 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   send({ type: 'cdp_detached', reason });
 });
 
+// ── tải không hỏi "Lưu" ────────────────────────────────────────────────────
+// Chrome bật "Hỏi vị trí lưu từng tệp" (hay gặp trên Windows 10) thì mỗi lần Flow tải file lại hiện hộp Lưu, phải bấm tay.
+// Bắt lượt tải của trang Flow ngay lúc Chrome xin tên file (TRƯỚC khi hiện hộp Lưu), hủy nó, rồi extension tự tải lại
+// cùng file với saveAs:false (không bao giờ hỏi). File vẫn về thư mục Downloads như cũ, app nhận như cũ.
+const FLOW_DL = /(^|\.)(flow\.google\.com|labs\.google|flow-content\.google|googleusercontent\.com|storage\.googleapis\.com)(\/|:|$)/;
+
+function hostOf(u) {
+  try { return new URL(u).hostname; } catch { return ''; }
+}
+
+async function blobToDataUrl(blobUrl) {
+  // blob: chỉ đọc được trong đúng trang đã tạo nó: tìm tab cùng nguồn (tab Flow)
+  let tab = null;
+  try {
+    const origin = new URL(blobUrl.slice(5)).origin;
+    tab = (await chrome.tabs.query({ url: origin + '/*' }))[0] || null;
+  } catch {}
+  if (!tab) tab = await pickFlowTab();
+  if (!tab) throw new Error('NO_FLOW_TAB');
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    args: [blobUrl],
+    func: async (u) => {
+      const b = await (await fetch(u)).blob();
+      return await new Promise((ok, bad) => {
+        const r = new FileReader();
+        r.onload = () => ok(r.result);
+        r.onerror = () => bad(String(r.error));
+        r.readAsDataURL(b);
+      });
+    },
+  });
+  if (!res?.result) throw new Error('blob rỗng');
+  return res.result;
+}
+
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  const url = item.finalUrl || item.url || '';
+  const fromFlow = FLOW_DL.test(hostOf(item.referrer || '')) || FLOW_DL.test(hostOf(url))
+    || (url.startsWith('blob:https://') && FLOW_DL.test(hostOf(url.slice(5))));
+  if (item.byExtensionId || !fromFlow || !/^(https?:|blob:|data:)/.test(url)) {
+    suggest();
+    return;
+  }
+  const name = (item.filename || '').split(/[\/]/).pop() || undefined;
+  (async () => {
+    try {
+      await chrome.downloads.cancel(item.id);
+      chrome.downloads.erase({ id: item.id }).catch(() => {});
+      const src = url.startsWith('blob:') ? await blobToDataUrl(url) : url;
+      await chrome.downloads.download({ url: src, filename: name, saveAs: false, conflictAction: 'uniquify' });
+    } catch (e) {
+      addLog(`Không tự tải được ${name || 'file'} (${e?.message || e}): bấm Lưu trên hộp thoại của Chrome`, 'warn');
+      suggest();   // để Chrome tải như bình thường
+    }
+  })();
+  return true;   // trả lời sau (không gọi suggest khi đã hủy và tải lại)
+});
+
 // ── báo app mỗi file tải xong (app chép file từ thư mục Downloads vào phim) ───
 
 chrome.downloads.onChanged.addListener(async (delta) => {
