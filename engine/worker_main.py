@@ -261,7 +261,13 @@ def keep_flow_bridge():
 
 
 def main():
-    log.info("Worker %s khởi động, API %s", WORKER_ID, API)
+    try:   # bản engine = giờ sửa file mới nhất (để biết máy đang chạy bản nào khi đọc log)
+        import datetime as _dt
+        _newest = max(f.stat().st_mtime for f in Path(__file__).resolve().parent.rglob("*.py") if "tests" not in f.parts)
+        _build = _dt.datetime.fromtimestamp(_newest).strftime("%Y-%m-%d %H:%M")
+    except Exception:  # noqa: BLE001
+        _build = "?"
+    log.info("Worker %s khởi động, API %s, bản engine %s", WORKER_ID, API, _build)
     keep_flow_bridge()
     misses = 0
     while True:
