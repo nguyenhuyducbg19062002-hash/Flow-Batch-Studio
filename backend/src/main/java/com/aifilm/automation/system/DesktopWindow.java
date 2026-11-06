@@ -49,9 +49,9 @@ public class DesktopWindow {
         if (Boolean.getBoolean("afm.noBrowser")) {
             return;   // chạy dev (IntelliJ + npm run dev): không mở cửa sổ
         }
-        Optional<Path> edge = findEdge();
+        Optional<Path> edge = findAppBrowser();
         if (edge.isEmpty()) {
-            log.warn("Không tìm thấy Microsoft Edge: mở giao diện bằng trình duyệt mặc định");
+            log.warn("Không tìm thấy Microsoft Edge / Google Chrome: mở giao diện bằng trình duyệt mặc định");
             Browser.open(url);
             return;
         }
@@ -112,7 +112,8 @@ public class DesktopWindow {
         // mọi tiến trình msedge.exe có đường dẫn profile ui-window trong dòng lệnh là của cửa sổ này.
         String profile = profileDir().toString().toLowerCase(java.util.Locale.ROOT).replace("'", "''");
         // Không dùng dấu ngoặc kép trong lệnh: Windows bỏ chúng khi truyền tham số cho powershell.exe (-Filter thành "Invalid query")
-        String script = "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -and $_.CommandLine -and "
+        String script = "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'msedge.exe' -or $_.Name -eq 'chrome.exe') "
+                + "-and $_.CommandLine -and "
                 + "$_.CommandLine.ToLower().Contains('" + profile + "') } | "
                 + "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
         try {
@@ -176,6 +177,14 @@ public class DesktopWindow {
             }
         }
         return candidates.stream().filter(Files::isRegularFile).findFirst();
+    }
+
+    /**
+     * Trình duyệt mở cửa sổ app (--app): Edge, máy không có Edge (Windows 10 cũ, Edge bị gỡ) thì Chrome.
+     * Profile riêng (ui-window) nên không đụng Chrome / Edge của người dùng.
+     */
+    public static Optional<Path> findAppBrowser() {
+        return findEdge().or(DesktopWindow::findChrome);
     }
 
     public static Optional<Path> findChrome() {

@@ -63,7 +63,7 @@ public class AiFlowAutomationApplication {
             System.exit(1);
         }
         String url = "http://127.0.0.1:" + PORT;
-        var edge = DesktopWindow.findEdge();
+        var edge = DesktopWindow.findAppBrowser();
         if (edge.isPresent()) {
             try {
                 DesktopWindow.launch(edge.get(), url);
