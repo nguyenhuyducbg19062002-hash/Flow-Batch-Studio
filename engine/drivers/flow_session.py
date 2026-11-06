@@ -17,6 +17,7 @@ cửa sổ thì nó phải nằm đúng vị trí S (có đúng S ô mới hơn 
 xong báo lỗi tạm thời để thử lại. Mỏ neo bị cuộn ảo ẩn đi (phiên dài) hoặc không có khóa ổn định thì bỏ qua kiểm tra này.
 """
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
@@ -143,7 +144,7 @@ class SessionRunner:
             self.submitted += 1
             self._handled_error = None
             if self.gap_s and len(self.slots) < self.capacity:
-                self.sleep(self.gap_s)   # giãn nhịp giữa các lần gửi
+                self.sleep(self.gap_s * random.uniform(1.0, 1.8))   # giãn nhịp giữa các lần gửi
 
     # ---------- theo dõi kết quả ----------
     def _poll(self) -> bool:

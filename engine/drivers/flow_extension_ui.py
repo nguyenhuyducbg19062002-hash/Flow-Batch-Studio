@@ -254,8 +254,18 @@ class FlowExtensionUiDriver(FlowBrowserDriver):
                     raise Cancelled("Người dùng hủy job") from e
                 time.sleep(4 + 3 * reloads)
 
-    def run_session(self, *a, **kw):
-        raise ConfigError("Flow qua Extension chạy từng cảnh một (chỉ có một tab Flow)")
+    def run_session(self, first_job: dict, claim_more, on_start, on_done, on_fail, stop_of) -> None:
+        """
+        Gửi liên tiếp nhiều prompt trong cùng tab Flow (tài khoản đặt "Số lệnh chạy cùng lúc" từ 2), ô nào xong trước thì tải
+        về trước (docs/SONG-SONG.md). Dùng chung SessionRunner với chế độ trình duyệt riêng; tải về qua Chrome như thường.
+        """
+        self._job = first_job
+        self._wait_tab(stop_of(first_job))
+        bridge.progress("start", first_job, "Gửi liên tiếp tối đa %s prompt" % (first_job.get("account") or {}).get("maxConcurrent"))
+        try:
+            super().run_session(first_job, claim_more, on_start, on_done, on_fail, stop_of)
+        except PlaywrightError as e:
+            raise TabLost(f"Mất tab Flow trong phiên gửi liên tiếp: {str(e)[:200]}") from e
 
     # ── FOREGROUND: điền sẵn, người dùng bấm Tạo ───────────────────────────
 

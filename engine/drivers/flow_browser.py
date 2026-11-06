@@ -253,15 +253,22 @@ class _SessionOps:
 
     def submit(self, job: dict) -> None:
         d, page, s = self.d, self.page, self.s
+        d._pace = pace_mod.Pace(pace_mod.factor(job))
         d._dismiss_popups(page)
-        d._apply_settings(page, s, job["kind"], job)
+        d._pace.pause(page, 1.5, 4.0)   # như người chuyển sang mục mới
+        env_key = d._setup_env_once(page, s, job)
         d._select_mode(page, s, job["kind"])
         uploaded = d._upload_refs(page, s, job["referenceImages"])
         page.wait_for_timeout(1_500 if uploaded else 150)   # ô ảnh vừa tải lên hiện trong lưới nhanh hơn
         before = self.generated_tiles()
         before_top = before[0] if before else None
         before_labels = {t.label for t in before[:5]}
-        d._compose_prompt(page, s, job["prompt"], d._ref_ids(job), mention_all=job["kind"] == "IMAGE")
+        attached = d._compose_prompt(page, s, job["prompt"], d._ref_ids(job), mention_all=job["kind"] == "IMAGE") or set()
+        need = d._needed_refs(d._shown_prompt(job), d._ref_ids(job))
+        if need - attached:
+            raise TransientError(f"Chỉ gắn được {len(need & attached)}/{len(need)} ảnh @tag vào prompt: không bấm Tạo")
+        d._check_env_before_send(page, s, job, env_key)
+        d._pace.pause(page, 1.0, 2.5)   # đọc lại prompt rồi mới bấm Tạo
         reply_sel, auto_reply = s.get("agent_reply_marker"), s.get("agent_auto_reply")
         can_reply = not _is_todo(reply_sel) and bool(auto_reply)
         replies = page.locator(reply_sel).count() if can_reply else 0
@@ -1337,6 +1344,29 @@ class FlowBrowserDriver:
     # ---------- BACKGROUND: worker tự làm hết ----------
     _pace = pace_mod.NONE
 
+    @staticmethod
+    def _env_key(page, job: dict) -> tuple:
+        return (project_url(page.url), job["kind"], job.get("flowModel"), job.get("aspectRatio"),
+                job.get("flowThinking"), job.get("videoQuality"), job.get("durationSeconds"))
+
+    def _setup_env_once(self, page, s: dict, job: dict) -> tuple:
+        """Lần đầu với dự án / loại / model này: cài môi trường đầy đủ. Trả về env_key."""
+        env_key = self._env_key(page, job)
+        if env_key not in _ENV_READY:
+            self._apply_settings(page, s, job["kind"], job)
+            _ENV_READY.add(env_key)
+            self._pace.pause(page, 0.5, 1.2)
+        return env_key
+
+    def _check_env_before_send(self, page, s: dict, job: dict, env_key: tuple):
+        """Mỗi lần gửi: nhìn chip (model, tỉ lệ, x1); đúng thì gửi luôn, sai thì mở bảng cài đặt sửa đúng mục sai."""
+        self._pace.pause(page, 0.6, 1.4)
+        if env_key in _ENV_READY and self._chip_ok(page, s, job["kind"], job):
+            log.info("Môi trường Flow (%s) đúng theo chip: gửi luôn", job["kind"])
+        else:
+            self._apply_settings(page, s, job["kind"], job)
+            _ENV_READY.add(env_key)
+
     def generate(self, job: dict, should_stop) -> GenerationResult:
         self._pace = pace_mod.Pace(pace_mod.factor(job))   # nhịp thao tác như người thật (Cài đặt → Tốc độ thao tác)
         self._tile_retries = job.get("errorTileRetries")   # Cài đặt → số lần bấm ↻ trên ô lỗi
@@ -1364,13 +1394,7 @@ class FlowBrowserDriver:
                         return self._edit_on_flow(page, s, job, staging, should_stop)
                     with tm.step("cai_dat"):
                         self._pace.pause(page, 1.5, 4.0)   # như người chuyển sang mục mới: nhìn màn hình một chút rồi mới làm
-                        env_key = (project_url(page.url), job["kind"], job.get("flowModel"), job.get("aspectRatio"),
-                                   job.get("flowThinking"), job.get("videoQuality"), job.get("durationSeconds"))
-                        if env_key not in _ENV_READY:
-                            # lần đầu với dự án / loại này: cài môi trường đầy đủ
-                            self._apply_settings(page, s, job["kind"], job)
-                            _ENV_READY.add(env_key)
-                            self._pace.pause(page, 0.5, 1.2)
+                        env_key = self._setup_env_once(page, s, job)   # lần đầu với dự án / loại này: cài môi trường đầy đủ
                         self._select_mode(page, s, job["kind"])
                     with tm.step("kiem_tra_lan_truoc"):
                         media_id = self._pending_result(page, s, job)
@@ -1391,12 +1415,7 @@ class FlowBrowserDriver:
                         with tm.step("kiem_tra_moi_truong"):
                             # mỗi lần gửi: nhìn chip trước (model, tỉ lệ, x1). Đúng và môi trường đã kiểm tra trong phiên này
                             # thì gửi luôn; sai thì mở bảng cài đặt, chọn model trước rồi sửa đúng mục sai (thao tác vừa phải)
-                            self._pace.pause(page, 0.6, 1.4)
-                            if env_key in _ENV_READY and self._chip_ok(page, s, job["kind"], job):
-                                log.info("Môi trường Flow (%s) đúng theo chip: gửi luôn", job["kind"])
-                            else:
-                                self._apply_settings(page, s, job["kind"], job)
-                                _ENV_READY.add(env_key)
+                            self._check_env_before_send(page, s, job, env_key)
                         self._save_pending(page, job, before)
                         self._pace.pause(page, 1.0, 2.5)   # đọc lại prompt rồi mới bấm Tạo
                         send_prompt(page, s)
@@ -1460,7 +1479,7 @@ class FlowBrowserDriver:
             except (PlaywrightTimeout, AssertionError) as e:
                 raise TransientError(f"Hết thời gian chờ một phần tử trên Flow: {str(e)[:500]}") from e
             log.info("Phiên Flow song song: tối đa %d lệnh cùng lúc trên %s", capacity, first_job["account"].get("email"))
-            gap = float(os.environ.get("AFM_GAP_S", "30"))   # giãn nhịp giữa 2 lần gửi lệnh (giây); main cũ chạy tuần tự nên cách nhau cả phút
+            gap = float(os.environ.get("AFM_GAP_S", "8"))   # cộng thêm ngẫu nhiên trong SessionRunner;   # giãn nhịp giữa 2 lần gửi lệnh (giây); main cũ chạy tuần tự nên cách nhau cả phút
             SessionRunner(_SessionOps(self, page, s, ctx), capacity, claim_more, on_start, on_done, on_fail, stop_of,
                           gap_s=gap).run(first_job)
 

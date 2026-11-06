@@ -85,8 +85,11 @@ public class JobClaimService {
         if (p == null || p.getStatus() != ProjectStatus.RUNNING
                 || p.getRunMode() != com.aifilm.automation.project.RunMode.BACKGROUND
                 || (p.getProvider() != com.aifilm.automation.project.Provider.FLOW_BROWSER
+                    && p.getProvider() != com.aifilm.automation.project.Provider.FLOW_EXTENSION
                     && p.getProvider() != com.aifilm.automation.project.Provider.FAKE)   // FAKE: để kiểm thử cả vòng không cần Google
-                || jobs.countByProjectIdAndStatus(p.getId(), JobStatus.GENERATING) >= p.effectiveParallel()) {
+                // giới hạn của phim; tài khoản đặt "Số lệnh chạy cùng lúc" cao hơn thì theo tài khoản
+                || jobs.countByProjectIdAndStatus(p.getId(), JobStatus.GENERATING)
+                    >= Math.max(p.effectiveParallel(), a.effectiveMaxConcurrent())) {
             return Optional.empty();
         }
         Optional<JobEntity> next = pickNext(p, new HashSet<>(Set.of(-1L)));

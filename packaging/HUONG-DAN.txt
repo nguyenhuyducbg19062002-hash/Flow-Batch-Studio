@@ -52,8 +52,10 @@ Yêu cầu: Windows 10/11 64-bit, Google Chrome, tài khoản Google dùng đư�
 
 - Ghim extension "Flow Batch Studio – Flow Bridge" lên thanh công cụ; biểu tượng hiện ON khi đã nối với app.
 
-- Chrome -> Cài đặt -> Tải xuống: nên TẮT "Hỏi vị trí lưu từng tệp trước khi tải xuống". Nếu vẫn bật (hay gặp
-  trên Windows 10), extension 0.3.1 trở lên tự lưu file, không hiện hộp "Save As" nữa.
+- Chrome -> Cài đặt -> Tải xuống: nên TẮT "Hỏi vị trí lưu từng tệp trước khi tải xuống". Nếu vẫn bật (hay gặp
+
+  trên Windows 10), extension 0.3.1 trở lên tự lưu file, không hiện hộp "Save As" nữa.
+
 - Chrome hỏi "flow.google.com muốn tải nhiều tệp" (Download multiple files): bấm "Cho phép" (Allow) một lần.
 
 - Mở https://flow.google.com , đăng nhập Google. Chỉ để MỘT tab Flow.
@@ -142,5 +144,10 @@ GHI CHÚ
 
 - Lỗi / log: Cài đặt -> mở thư mục Log, gửi file app.log và worker-py-*.log cho người hỗ trợ.
 
-- Tắt app: nút "Thoát ứng dụng" ở góc trái dưới (hoặc đóng cửa sổ app).
-
+- Tắt app: nút "Thoát ứng dụng" ở góc trái dưới (hoặc đóng cửa sổ app).
+
+GỬI LIÊN TIẾP NHIỀU PROMPT (tùy chọn)
+------------------------------------
+- Tab Tài khoản -> sửa tài khoản -> "Số lệnh chạy cùng lúc" = 2 hoặc 3: app gửi liên tiếp 2-3 prompt (cách nhau
+  khoảng 8-15 giây), ô nào Flow tạo xong trước thì tải về trước. Đặt 1 = làm từng prompt một như cũ.
+- Gửi dồn làm hết lượt nhanh hơn và dễ bị Google để ý hơn: nên bắt đầu với 2.

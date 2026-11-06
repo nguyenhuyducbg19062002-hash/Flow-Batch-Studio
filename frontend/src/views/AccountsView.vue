@@ -119,7 +119,7 @@
               <input v-model.number="form.priority" type="number" class="input" />
             </div>
           </div>
-          <div v-if="form.provider === 'FLOW_BROWSER' || form.provider === 'FAKE'">
+          <div v-if="form.provider === 'FLOW_BROWSER' || form.provider === 'FLOW_EXTENSION' || form.provider === 'FAKE'">
             <label class="label">Số lệnh chạy cùng lúc (1–5)</label>
             <input v-model.number="form.maxConcurrent" type="number" min="1" max="5" class="input !w-28" />
             <p class="hint">

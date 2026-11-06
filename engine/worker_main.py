@@ -159,7 +159,7 @@ def _report_failed(job: dict, err: Exception):
 
 def wants_session(job: dict) -> bool:
     """Chạy song song (docs/SONG-SONG.md): tài khoản được đặt từ 2 lệnh cùng lúc trở lên, Flow, chế độ chạy ngầm, không phải sửa trên Flow."""
-    return (job.get("provider") in ("FLOW_BROWSER", "FAKE") and job.get("runMode") == "BACKGROUND" and not job.get("editInstruction")
+    return (job.get("provider") in ("FLOW_BROWSER", "FLOW_EXTENSION", "FAKE") and job.get("runMode") == "BACKGROUND" and not job.get("editInstruction")
             and int((job.get("account") or {}).get("maxConcurrent") or 1) > 1)
 
 
