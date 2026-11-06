@@ -29,6 +29,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
+from .errors import TabLost
 from .errors import (AccountBroken, AuthRequired, BotSuspected, Cancelled, ConfigError, GenerationResult, PausedByUser, QuotaExceeded,
                      Rejected, TransientError, proxy_error)
 from .flow_session import SessionRunner, Tile
@@ -1120,7 +1121,7 @@ class FlowBrowserDriver:
         except PlaywrightError as e:
             if self._page_gone(page, e):
                 # tab / cửa sổ Flow bị đóng giữa chừng: không phải lỗi của prompt, dừng phim chờ người dùng mở lại
-                raise PausedByUser("Tab Flow đã bị đóng trong lúc chờ kết quả: mở lại Chrome + tab Flow rồi bấm Chạy") from e
+                raise TabLost("Tab Flow đã bị đóng trong lúc chờ kết quả: mở lại Chrome + tab Flow rồi bấm Chạy") from e
             log.warning("Không bấm được nút thử lại trên ô lỗi: %s", str(e)[:200])
             return False
         log.info("Ô lỗi trên Flow: đã bấm ↻ thử lại (%s)", key[:160])
@@ -1609,7 +1610,7 @@ class FlowBrowserDriver:
                 if "quota" in user_action:
                     raise QuotaExceeded(f"Bạn báo tài khoản {job['account']['email']} hết lượt ở cảnh {job['externalId']}")
                 if not ctx.pages:
-                    raise PausedByUser(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}")
+                    raise TabLost(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}")
                 if failures:
                     raise TransientError(f"Không lưu được file tải về: {failures[0]}")
                 if time.monotonic() - state["last_check"] > 5:
@@ -1671,7 +1672,7 @@ class FlowBrowserDriver:
             except PlaywrightError as e:
                 # chỉ khi cửa sổ thật sự đóng mới tạm dừng phim (cảnh này quay về "Chờ chạy"); lỗi khác là lỗi tạm thời
                 if page.is_closed() or not ctx.pages:
-                    raise PausedByUser(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}") from e
+                    raise TabLost(f"Bạn đã đóng cửa sổ Flow ở cảnh {job['externalId']}") from e
                 raise TransientError(f"Lỗi trình duyệt khi chờ tải về: {str(e)[:300]}") from e
             self._clear_pending(job)
             try:

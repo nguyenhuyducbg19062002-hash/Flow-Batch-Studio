@@ -47,6 +47,10 @@ class PausedByUser(WorkerError):
     code = "PAUSED"
 
 
+class TabLost(PausedByUser):
+    """Tab / cửa sổ Flow bị đóng giữa chừng. Driver extension tự mở lại tab Flow và làm lại cảnh vài lần trước khi dừng phim."""
+
+
 class AccountBroken(WorkerError):
     """Tài khoản không dùng được vì cấu hình của chính nó (proxy sai / không kết nối được): backend tắt tài khoản."""
     code = "ACCOUNT_BROKEN"

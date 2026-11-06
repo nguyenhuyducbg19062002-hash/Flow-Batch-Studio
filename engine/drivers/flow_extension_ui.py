@@ -27,7 +27,7 @@ from playwright.sync_api import sync_playwright
 
 from flow_ext import bridge
 
-from .errors import Cancelled, ConfigError, GenerationResult, PausedByUser, TransientError
+from .errors import Cancelled, ConfigError, GenerationResult, PausedByUser, TabLost, TransientError
 from .flow_browser import (DEFAULT_VIDEO_QUALITY, FLOW_URL, FlowBrowserDriver, _status, edit_media_id,
                            project_url)
 from .helper_overlay import overlay_script
@@ -123,8 +123,8 @@ class FlowExtensionUiDriver(FlowBrowserDriver):
                 if not any(m in msg.lower() for m in cls._NO_WINDOW_MARKS):
                     raise TransientError(f"Không điều khiển được tab Flow qua extension: {msg[:300]}") from e
                 if time.monotonic() - started > cls.NO_WINDOW_WAIT_S:
-                    raise PausedByUser("Chrome không còn cửa sổ / tab Flow (đã bị đóng?): mở Chrome, mở tab "
-                                       "flow.google.com đã đăng nhập rồi bấm Chạy") from e
+                    raise TabLost("Chrome không còn cửa sổ / tab Flow (đã bị đóng?): mở Chrome, mở tab "
+                                  "flow.google.com đã đăng nhập rồi bấm Chạy") from e
                 if not logged:
                     logged = True
                     log.warning("Chrome không còn cửa sổ / tab Flow: chờ mở lại (%ss)…", cls.NO_WINDOW_WAIT_S)
@@ -226,12 +226,33 @@ class FlowExtensionUiDriver(FlowBrowserDriver):
     def generate(self, job: dict, should_stop) -> GenerationResult:
         return self._run(job, lambda: self._background(job, should_stop))
 
+    # Tab Flow bị đóng / mất kết nối giữa chừng: tự tải lại (extension mở lại tab Flow) và làm lại cảnh này, tối đa ngần này lần
+    TAB_RELOADS = int(os.environ.get("AVS_FLOW_TAB_RELOADS", "3"))
+    _GONE_MARKS = ("has been closed", "target closed", "target_closed", "no current window", "no tab with id",
+                   "websocket", "connection closed", "detached")
+
     def _background(self, job: dict, should_stop) -> GenerationResult:
-        self._wait_tab(should_stop)
-        try:
-            return super().generate(job, should_stop)
-        except PlaywrightError as e:
-            raise TransientError(f"Mất kết nối tới tab Flow: {str(e)[:300]}") from e
+        reloads = 0
+        while True:
+            self._wait_tab(should_stop)
+            try:
+                return super().generate(job, should_stop)
+            except (TabLost, PlaywrightError) as e:
+                gone = isinstance(e, TabLost) or any(m in str(e).lower() for m in self._GONE_MARKS)
+                if not gone:
+                    raise TransientError(f"Mất kết nối tới tab Flow: {str(e)[:300]}") from e
+                if reloads >= self.TAB_RELOADS:
+                    if isinstance(e, TabLost):
+                        raise
+                    raise TabLost(f"Mất tab Flow ở cảnh {job['externalId']} sau {reloads} lần tải lại: "
+                                  f"{str(e)[:200]}") from e
+                reloads += 1
+                log.warning("Mất tab Flow ở cảnh %s (%s): tải lại tab Flow và làm lại (%d/%d)",
+                            job["externalId"], str(e)[:120], reloads, self.TAB_RELOADS)
+                self._step(f"Mất tab Flow: tải lại và làm lại ({reloads}/{self.TAB_RELOADS})")
+                if should_stop():
+                    raise Cancelled("Người dùng hủy job") from e
+                time.sleep(4 + 3 * reloads)
 
     def run_session(self, *a, **kw):
         raise ConfigError("Flow qua Extension chạy từng cảnh một (chỉ có một tab Flow)")

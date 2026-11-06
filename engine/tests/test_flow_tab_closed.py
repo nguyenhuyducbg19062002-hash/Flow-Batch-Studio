@@ -63,3 +63,42 @@ class RetryTileClosedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReloadTest(unittest.TestCase):
+    def driver(self, outcomes):
+        d = fx.FlowExtensionUiDriver.__new__(fx.FlowExtensionUiDriver)
+        d._wait_tab = mock.Mock()
+        d._step = mock.Mock()
+        seq = list(outcomes)
+
+        def gen(self_, job, should_stop):
+            o = seq.pop(0)
+            if isinstance(o, Exception):
+                raise o
+            return o
+        return d, gen
+
+    def run_bg(self, outcomes):
+        d, gen = self.driver(outcomes)
+        with mock.patch.object(fx.FlowBrowserDriver, "generate", gen), mock.patch.object(fx.time, "sleep"):
+            return d, d._background({"externalId": "CHAR-1"}, lambda: False)
+
+    def test_tab_closed_reloads_and_retries(self):
+        from drivers.errors import TabLost
+        d, res = self.run_bg([TabLost("tab đóng"), PlaywrightError("Target page, context or browser has been closed"), "ok"])
+        self.assertEqual(res, "ok")
+        self.assertEqual(d._wait_tab.call_count, 3)
+
+    def test_gives_up_after_limit(self):
+        from drivers.errors import TabLost
+        with self.assertRaises(TabLost):
+            self.run_bg([TabLost("x")] * 10)
+
+    def test_user_pause_not_reloaded(self):
+        with self.assertRaises(PausedByUser):
+            self.run_bg([PausedByUser("Bạn bấm Tạm dừng phim"), "ok"])
+
+    def test_other_playwright_error_transient(self):
+        with self.assertRaises(TransientError):
+            self.run_bg([PlaywrightError("Timeout 3000ms exceeded"), "ok"])

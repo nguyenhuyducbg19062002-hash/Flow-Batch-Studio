@@ -139,9 +139,17 @@ async function pickFlowTab() {
     tabs.find((t) => !t.discarded) ||
     tabs[0];
   if (!tab) {
-    const opened = await chrome.tabs.create({ url: FLOW_TAB_URL, active: false });
+    // Tab Flow bị đóng: mở lại. Chrome không còn cửa sổ nào (tabs.create báo "No current window") thì mở cửa sổ mới.
+    let opened = null;
+    try {
+      opened = await chrome.tabs.create({ url: FLOW_TAB_URL, active: false });
+    } catch {
+      const win = await chrome.windows.create({ url: FLOW_TAB_URL, focused: false, state: 'normal' });
+      opened = win?.tabs?.[0] || null;
+    }
+    if (opened) addLog('Đã mở lại tab Flow', 'info');
     await sleep(5000);
-    tab = await chrome.tabs.get(opened.id).catch(() => null);
+    tab = opened ? await chrome.tabs.get(opened.id).catch(() => null) : null;
   }
   return reviveTabIfNeeded(tab);
 }
