@@ -51,6 +51,20 @@ public class BatchController {
         return Map.of("path", dir.toString());
     }
 
+    /** Mở thư mục "lỗi" (kéo file sai vào đây). */
+    @PostMapping("/open-errors")
+    public Map<String, String> openErrors(@PathVariable long id, @PathVariable String kind) throws IOException {
+        var dir = batch.errorDir(id, kind(kind));
+        new ProcessBuilder("explorer.exe", dir.toString()).start();
+        return Map.of("path", dir.toString());
+    }
+
+    /** Quét thư mục "lỗi" ngay (không đợi lượt quét 20 giây). */
+    @PostMapping("/scan-errors")
+    public BatchService.ErrorScanResult scanErrors(@PathVariable long id, @PathVariable String kind) {
+        return batch.scanErrorFolder(id, kind(kind));
+    }
+
     static PromptKind kind(String s) {
         return switch (s.toLowerCase(Locale.ROOT)) {
             case "image", "images", "anh" -> PromptKind.IMAGE;

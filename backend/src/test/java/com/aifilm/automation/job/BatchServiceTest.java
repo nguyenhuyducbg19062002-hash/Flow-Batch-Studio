@@ -25,15 +25,15 @@ class BatchServiceTest {
     }
 
     @Test
-    void numbering_followsFileOrderThenRow_andPadsToAtLeastThreeDigits() {
+    void numbering_followsFileOrderThenRow_plainNumbers() {
         PromptEntity panel = prompt(10L, PromptKind.IMAGE, 2, 1);   // file Excel thứ 2
         PromptEntity b = prompt(11L, PromptKind.IMAGE, 1, 2);
         PromptEntity a = prompt(12L, PromptKind.IMAGE, 1, 1);
         PromptEntity video = prompt(13L, PromptKind.VIDEO, 1, 1);
         Map<Long, Integer> n = BatchNumbering.numbers(List.of(panel, b, a, video), PromptKind.IMAGE);
         assertEquals(Map.of(12L, 1, 11L, 2, 10L, 3), n);
-        assertEquals("007", BatchNumbering.baseName(7, 94));
-        assertEquals("0042", BatchNumbering.baseName(42, 1200));
+        assertEquals("7", BatchNumbering.baseName(7, 94));
+        assertEquals("42", BatchNumbering.baseName(42, 1200));
     }
 
     private static PromptEntity prompt(long id, PromptKind kind, int sourceOrder, int seq) {

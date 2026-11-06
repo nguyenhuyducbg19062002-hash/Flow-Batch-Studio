@@ -26,5 +26,13 @@ public record JobPayload(
         String editInstruction,
         String editSourceUrl,
         /** Seedance: tạo kèm âm thanh; null = theo mặc định (bật). */
-        Boolean generateAudio) {
+        Boolean generateAudio,
+        /** Nhịp thao tác như người thật trên Flow (Cài đặt human_pace): 0 = không dừng, 1 = bình thường, 2 = chậm gấp đôi. */
+        Double humanPace,
+        /** Model cần chọn trong bảng cài đặt Flow (Cài đặt flow_image_model / flow_video_model); rỗng = giữ model hiện tại. */
+        String flowModel,
+        /** Số lần bấm ↻ trên ô lỗi của Flow trước khi bỏ cuộc (Cài đặt error_tile_retries, mặc định 10). */
+        Integer errorTileRetries,
+        /** Thinking level của ảnh trên Flow: low | medium | high; rỗng = giữ nguyên. */
+        String flowThinking) {
 }

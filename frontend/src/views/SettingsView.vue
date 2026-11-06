@@ -15,6 +15,10 @@
             <option value="false">Không</option>
             <option value="true">Có</option>
           </select>
+          <select v-else-if="f.type === 'select'" v-model="settings[f.key]" class="input">
+            <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+          <input v-else-if="f.type === 'text'" v-model="settings[f.key]" type="text" :placeholder="f.placeholder" class="input" />
           <input v-else v-model="settings[f.key]" type="number" :min="f.min" :max="f.max" class="input" />
           <p class="hint">{{ f.hint }}</p>
         </div>
@@ -60,6 +64,21 @@ import { settingsApi, systemApi, errMsg } from '@/api'
 import { store } from '@/store'
 
 const fields = [
+  { key: 'flow_image_model', label: 'Model ảnh trên Flow', type: 'text', placeholder: 'vd: Nano Banana 2.1 (để trống: giữ model đang chọn)',
+    hint: 'Mỗi lần gửi prompt ảnh, app chọn model này trong bảng cài đặt của Flow. Ghi đúng tên như Flow hiển thị.' },
+  { key: 'flow_thinking_level', label: 'Thinking level (ảnh)', type: 'select',
+    hint: 'Mức "Thinking level" trong bảng cài đặt ảnh của Flow.',
+    options: [{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: '', label: 'Giữ nguyên như Flow đang chọn' }] },
+  { key: 'flow_video_model', label: 'Model video trên Flow', type: 'text', placeholder: 'vd: Veo 3.1 - Fast (để trống: giữ model đang chọn)',
+    hint: 'Mỗi lần gửi prompt video, app chọn model này.' },
+  { key: 'error_tile_retries', label: 'Số lần bấm ↻ khi Flow báo lỗi', min: 0, max: 50,
+    hint: 'Ô kết quả báo "Không thành công / hoạt động bất thường": app bấm ↻ thử lại đúng prompt đó tối đa ngần này lần, quá thì cho tài khoản nghỉ.' },
+  { key: 'suspicious_cooldown_min_minutes', label: 'Flow nghi ngờ: nghỉ ít nhất (phút)', min: 1, max: 1440,
+    hint: 'Thử lại hết lượt mà Flow vẫn báo hoạt động bất thường: tài khoản nghỉ ngẫu nhiên trong khoảng này.' },
+  { key: 'suspicious_cooldown_max_minutes', label: 'Flow nghi ngờ: nghỉ nhiều nhất (phút)', min: 1, max: 1440,
+    hint: 'Mặc định 30–45 phút.' },
+  { key: 'human_pace', label: 'Tốc độ thao tác trên Flow', type: 'select', hint: 'Prompt luôn dán thẳng; gắn ảnh @tag và các cú bấm có khoảng dừng ngẫu nhiên như người thật. Áp dụng từ mục tạo kế tiếp.',
+    options: [{ value: '0.6', label: 'Nhanh' }, { value: '1', label: 'Vừa, như người thật (khuyên dùng)' }, { value: '1.5', label: 'Chậm' }, { value: '2', label: 'Rất chậm' }] },
   { key: 'worker_processes', label: 'Số worker chạy song song', min: 1, max: 20, hint: 'Mỗi worker mở một trình duyệt Chrome. Khuyến nghị 2–5 tùy RAM. Áp dụng ngay khi lưu.' },
   { key: 'job_timeout_minutes', label: 'Thời gian chờ render tối đa (phút)', min: 1, max: 120, hint: 'Quá thời gian này coi là lỗi tạm thời và thử lại.' },
   { key: 'quota_cooldown_minutes', label: 'Tài khoản hết quota nghỉ (phút)', min: 1, max: 10080, hint: 'Sau thời gian này tài khoản được dùng lại tự động.' },
@@ -75,7 +94,8 @@ const dirs = computed(() => store.info ? [
 
 onMounted(async () => {
   try {
-    settings.value = await settingsApi.get()
+    settings.value = { human_pace: '1', flow_thinking_level: 'low', flow_image_model: 'Nano Banana 2.1', flow_video_model: '', error_tile_retries: '10',
+      suspicious_cooldown_min_minutes: '30', suspicious_cooldown_max_minutes: '45', ...(await settingsApi.get()) }
   } catch (e) {
     store.toast(errMsg(e), 'error')
   }

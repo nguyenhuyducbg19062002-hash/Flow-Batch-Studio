@@ -146,7 +146,7 @@ public class JobClaimService {
         } else if (waiting > 0) {
             reason = waiting + " " + part + (k == PromptKind.VIDEO
                     ? " chưa chạy được vì thiếu ảnh tham chiếu (ảnh phải được \"Đổi tên\" sang Folder Ảnh trước)"
-                    : " chưa chạy được vì thiếu ảnh gốc");
+                    : " (ảnh đổi đồ) đang chờ ảnh gốc: duyệt rồi bấm \"Đổi tên\" để ảnh gốc vào Folder Ảnh, app tự chạy tiếp");
         } else {
             reason = "Đã tạo xong phần " + part + ": kiểm tra thư mục chờ duyệt, báo số sai để làm lại, rồi bấm \"Đổi tên\"";
         }

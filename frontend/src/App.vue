@@ -154,8 +154,8 @@ const steps = ['Chạy', 'Duyệt thư mục', 'Đổi tên']
 const BANNERS = {
   accounts: { title: 'Tài khoản', step: -1, desc: 'Đăng nhập Google Flow một lần cho mỗi tài khoản; hết quota sẽ tự chuyển tài khoản.' },
   projects: { title: 'Phim', step: -1, desc: 'Tạo phim, chọn thư mục; nạp cả thư mục Omni một lần cho cả ảnh lẫn video.' },
-  images: { title: 'Tạo ảnh hàng loạt', step: 0, desc: 'Tạo ảnh theo prompt → thư mục chờ duyệt (001.png…) → báo số sai làm lại → đổi tên đúng ID.' },
-  videos: { title: 'Tạo video hàng loạt', step: 0, desc: 'Tự upload ảnh @ID, gắn chip vào prompt, tạo video → thư mục chờ duyệt (001.mp4…) → đổi tên.' },
+  images: { title: 'Tạo ảnh hàng loạt', step: 0, desc: 'Tạo ảnh → thư mục chờ duyệt (1.png, 2.png…) → ảnh sai kéo vào thư mục lỗi → Đổi tên sang Ảnh tham chiếu.' },
+  videos: { title: 'Tạo video hàng loạt', step: 0, desc: 'Tự upload ảnh @ID từ Ảnh tham chiếu, tạo video → thư mục chờ duyệt (1.mp4…) → video sai kéo vào lỗi → Đổi tên.' },
   manual: { title: 'Tự làm trên Flow', step: 1, desc: 'Bạn dán prompt, gắn ảnh, bấm Tạo và Tải xuống trên Flow; app tự nhận file và đặt đúng tên.' },
   settings: { title: 'Cài đặt', step: -1, desc: 'Số worker, thời gian chờ render, thời gian nghỉ khi hết quota.' },
 }

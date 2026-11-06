@@ -88,7 +88,21 @@ public class JobPayloadFactory {
                 prompt.getKind() == PromptKind.VIDEO ? project.getVideoDuration() : null,
                 project.getVideoQuality() == null ? "720p" : project.getVideoQuality(),
                 job.getEditInstruction(), job.getEditInstruction() == null ? null : job.getFlowMediaUrl(),
-                project.getGenerateAudio());
+                project.getGenerateAudio(),
+                humanPace(),
+                prompt.getKind() == PromptKind.VIDEO ? settings.getSetting("flow_video_model", "").trim()
+                        : settings.getSetting("flow_image_model", "Nano Banana 2.1").trim(),
+                Math.max(0, Math.min(50, settings.getIntSetting("error_tile_retries", 10))),
+                prompt.getKind() == PromptKind.IMAGE ? settings.getSetting("flow_thinking_level", "low").trim().toLowerCase() : null);
+    }
+
+    /** Cài đặt "Tốc độ thao tác" (human_pace), mặc định 1; giá trị lỗi coi như 1. */
+    private double humanPace() {
+        try {
+            return Math.max(0, Math.min(5, Double.parseDouble(settings.getSetting("human_pace", "1"))));
+        } catch (RuntimeException e) {
+            return 1;
+        }
     }
 
     /**

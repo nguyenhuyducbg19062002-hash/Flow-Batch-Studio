@@ -301,7 +301,7 @@ class ErrorTileTests(unittest.TestCase):
             fb.FlowBrowserDriver._raise_if_error_tile(self.page(["X | Failed: might violate our policies"]), self.S, fb.Counter())
 
     def test_error_tile_js_is_valid_regex(self):
-        self.assertIn(r"/^\s*(\S{0,3}\s*)?failed\b/i", fb.FlowBrowserDriver._ERROR_TILES_JS)
+        self.assertIn(r"/^\s*(\S{0,12}\s*)?(failed\b|không thành công)/i", fb.FlowBrowserDriver._ERROR_TILES_JS)
 
 
 class UploadTests(unittest.TestCase):

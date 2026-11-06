@@ -281,9 +281,9 @@ const stats = computed(() => {
 
 const folders = computed(() => current.value ? [
   { label: 'Nguồn prompt', path: current.value.project.sourceDir, icon: FileText, tile: 'icon-tile-amber' },
-  { label: 'Ảnh chờ duyệt (001.png…)', path: current.value.reviewDirs?.IMAGE, icon: FolderOpen, tile: 'icon-tile-amber' },
+  { label: 'Ảnh chờ duyệt (1.png, 2.png…)', path: current.value.reviewDirs?.IMAGE, icon: FolderOpen, tile: 'icon-tile-amber' },
   { label: 'Folder Ảnh (sau khi đổi tên)', path: current.value.project.imageDir, icon: ImageIcon, tile: 'icon-tile-violet' },
-  { label: 'Video chờ duyệt (001.mp4…)', path: current.value.reviewDirs?.VIDEO, icon: FolderOpen, tile: 'icon-tile-amber' },
+  { label: 'Video chờ duyệt (1.mp4, 2.mp4…)', path: current.value.reviewDirs?.VIDEO, icon: FolderOpen, tile: 'icon-tile-amber' },
   { label: 'Folder Video (sau khi đổi tên)', path: current.value.project.videoDir, icon: Video, tile: 'icon-tile-sky' },
 ] : [])
 

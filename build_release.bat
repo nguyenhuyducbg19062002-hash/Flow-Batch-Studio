@@ -89,11 +89,23 @@ if not exist "%ISCC%" (
 )
 if not exist "%DIST%" mkdir "%DIST%"
 copy /y "%ROOT%packaging\FlowBatchStudio.iss" "%BUILD%\FlowBatchStudio.iss" >nul || goto :fail
+copy /y "%ROOT%packaging\HUONG-DAN.txt" "%BUILD%\HUONG-DAN.txt" >nul || goto :fail
 "%ISCC%" /Q /DAppVersion=%APP_VERSION% /DImageDir="%IMAGE%" /DIconFile="%BUILD%\app.ico" /O"%DIST%" "%BUILD%\FlowBatchStudio.iss" || goto :fail
+
+rem Goi gui nguoi dung: bo cai + thu muc extension Chrome + huong dan, nen thanh mot file zip
+set "SHARE=%BUILD%\share\FlowBatchStudio-%APP_VERSION%"
+mkdir "%SHARE%" || goto :fail
+copy /y "%DIST%\FlowBatchStudio-Setup-%APP_VERSION%.exe" "%SHARE%\" >nul || goto :fail
+copy /y "%ROOT%packaging\HUONG-DAN.txt" "%SHARE%\HUONG-DAN.txt" >nul || goto :fail
+robocopy "%ROOT%engine\flow_ext\extension" "%SHARE%\extension-chrome" /e /njh /njs /nfl /ndl >nul
+if errorlevel 8 goto :fail
+if exist "%DIST%\FlowBatchStudio-%APP_VERSION%.zip" del /q "%DIST%\FlowBatchStudio-%APP_VERSION%.zip"
+powershell -NoProfile -Command "Compress-Archive -Path '%SHARE%' -DestinationPath '%DIST%\FlowBatchStudio-%APP_VERSION%.zip' -Force" || goto :fail
 
 echo.
 echo ======================================================================
 echo  XONG: %DIST%\FlowBatchStudio-Setup-%APP_VERSION%.exe
+echo        Goi gui nguoi dung ^(bo cai + extension + huong dan^): %DIST%\FlowBatchStudio-%APP_VERSION%.zip
 echo        Ban chay ngay ^(khong can cai^): %IMAGE%\FlowBatchStudio.exe
 echo ======================================================================
 exit /b 0

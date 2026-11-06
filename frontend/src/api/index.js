@@ -50,6 +50,9 @@ export const batchApi = {
   /** Đổi tên mọi file trong thư mục chờ duyệt sang tên đúng, chuyển vào Folder Ảnh / Folder Video */
   finalize: (id, part) => data(http.post(`/projects/${id}/batch/${part}/finalize`, null, { timeout: 600000 })),
   openReview: (id, part) => data(http.post(`/projects/${id}/batch/${part}/open-review`)),
+  /** Thư mục "lỗi": kéo file sai vào đây, app tự tạo lại số đó */
+  openErrors: (id, part) => data(http.post(`/projects/${id}/batch/${part}/open-errors`)),
+  scanErrors: (id, part) => data(http.post(`/projects/${id}/batch/${part}/scan-errors`)),
 }
 
 export const promptsApi = {

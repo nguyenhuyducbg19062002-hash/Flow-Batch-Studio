@@ -383,9 +383,8 @@ public class ReviewService {
     }
 
     /**
-     * Kết quả vừa tạo xong (AWAITING_REVIEW): chép vào thư mục chờ duyệt với tên là số thứ tự (005.png, 012.mp4) để người duyệt
-     * mở thư mục xem. Ảnh còn được ghi vào kho với nguồn REVIEW: ảnh đổi đồ dùng nó làm ảnh gốc được ngay, video thì chưa
-     * (video chỉ dùng ảnh đã đổi tên sang Folder Ảnh).
+     * Kết quả vừa tạo xong (AWAITING_REVIEW): chép vào thư mục chờ duyệt với tên là số thứ tự (5.png, 12.mp4) để người duyệt
+     * mở thư mục xem. Ảnh ở đây CHƯA được dùng để tag @: chỉ sau khi duyệt và "Đổi tên" sang Folder Ảnh mới dùng được.
      */
     @Transactional
     public JobEntity deliverToReview(long jobId) {
@@ -405,7 +404,7 @@ public class ReviewService {
         Path target = dir.resolve(BatchNumbering.baseName(no, numbers.size()) + extensionOf(staged.getFileName().toString()));
         Path part = target.resolveSibling(target.getFileName() + "." + UUID.randomUUID() + ".part");
         try {
-            Files.createDirectories(dir);
+            Files.createDirectories(dir.resolve(ERROR_DIR));   // thư mục "lỗi" có sẵn để người duyệt kéo file sai vào
             Files.copy(staged, part);
             Files.move(part, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             if (job.getReviewPath() != null && !Path.of(job.getReviewPath()).equals(target)) {
@@ -421,16 +420,6 @@ public class ReviewService {
         }
         job.setReviewPath(target.toString());
         job.setReviewNo(no);
-        if (prompt.getKind() == PromptKind.IMAGE) {
-            ProjectAssetEntity a = assets.findByProjectIdAndExternalId(project.getId(), prompt.getExternalId())
-                    .orElseGet(() -> new ProjectAssetEntity(project.getId(), prompt.getExternalId(), target.toString(),
-                            ProjectAssetEntity.SOURCE_REVIEW));
-            if (!ProjectAssetEntity.SOURCE_USER.equals(a.getSource())) {   // ảnh người dùng đưa vào thì giữ nguyên
-                a.setFilePath(target.toString());
-                a.setSource(ProjectAssetEntity.SOURCE_REVIEW);
-                assets.save(a);
-            }
-        }
         log.info("Job {}: kết quả → {}", job.getId(), target);
         return job;
     }
@@ -441,7 +430,12 @@ public class ReviewService {
         return revisions.findById(prompt.getCurrentRevisionId()).map(PromptRevisionEntity::getPromptText).orElse("");
     }
 
-    /** File trong thư mục chờ duyệt của một mục sắp tạo lại: cất vào "_lam-lai" để người duyệt không nhầm với bản mới. */
+    /** Thư mục con "lỗi" trong thư mục chờ duyệt: người duyệt kéo file sai vào đây, app tự tạo lại số đó. */
+    public static final String ERROR_DIR = "lỗi";
+    /** Trong "lỗi": file đã được app nhận để tạo lại (không xử lý lại lần nữa). */
+    public static final String ERROR_DONE_DIR = "đã xử lý";
+
+    /** File trong thư mục chờ duyệt của một mục sắp tạo lại: cất vào "lỗi/đã xử lý" để người duyệt không nhầm với bản mới. */
     private void moveAsideReviewFile(JobEntity job) {
         if (job.getReviewPath() == null) {
             return;
@@ -449,7 +443,7 @@ public class ReviewService {
         Path f = Path.of(job.getReviewPath());
         try {
             if (Files.isRegularFile(f)) {
-                Path aside = f.resolveSibling("_lam-lai");
+                Path aside = f.resolveSibling(ERROR_DIR).resolve(ERROR_DONE_DIR);
                 Files.createDirectories(aside);
                 String name = f.getFileName().toString();
                 int dot = name.lastIndexOf('.');

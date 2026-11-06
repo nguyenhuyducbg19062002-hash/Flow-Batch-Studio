@@ -21,7 +21,7 @@
               </span>
             </div>
             <div class="text-[12.5px] text-slate-500 mt-1">
-              Tạo xong tải về thư mục chờ duyệt, đặt tên theo số (001{{ ext }}, 002{{ ext }}…) đúng thứ tự file prompt.
+              Tạo xong tải về thư mục chờ duyệt, đặt tên theo số (1{{ ext }}, 2{{ ext }}, 3{{ ext }}…) đúng thứ tự file prompt.
             </div>
           </div>
           <button v-if="!running" @click="start" :disabled="busy || !counts.TOTAL" class="btn-primary !px-5">
@@ -72,7 +72,8 @@
           <p class="text-[12px] text-slate-500 leading-relaxed">
             <template v-if="isImage">
               Excel dạng <span class="font-mono">reference-prompts.xlsx</span>: cột <b>Reference ID</b> + <b>Prompt tạo reference</b>.
-              Ảnh đổi đồ (OUTFIT VARIANT) tự gắn ảnh gốc nhắc trong prompt; thêm ảnh tay bằng nút "+" ở từng dòng.
+              Ảnh đổi đồ (OUTFIT VARIANT) gắn @ảnh gốc: ảnh gốc phải được duyệt và <b>Đổi tên</b> sang Folder Ảnh trước,
+              app tự chạy tiếp ảnh đổi đồ sau khi đổi tên. Thêm ảnh tay bằng nút "+" ở từng dòng.
             </template>
             <template v-else>
               Excel dạng <span class="font-mono">all-video-prompts.xlsx</span>. Mỗi <span class="font-mono">@ID</span> trong prompt
@@ -97,13 +98,21 @@
             </span>
             <span class="text-[12px] font-medium text-slate-400 group-hover:text-indigo-600 shrink-0">Mở</span>
           </button>
+          <button @click="openErrors" class="group w-full flex items-center gap-3 text-left p-2 pr-3 rounded-xl border border-rose-200 bg-rose-50/40 hover:border-rose-300 hover:bg-rose-50 transition">
+            <span class="icon-tile !w-8 !h-8 !rounded-lg icon-tile-rose"><FolderX class="w-4 h-4" /></span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-[12.5px] font-medium text-slate-800">{{ isImage ? 'Ảnh' : 'Video' }} sai: kéo file vào thư mục <span class="font-mono">lỗi</span></span>
+              <span class="block text-[11.5px] text-slate-500">App tự tạo lại đúng số đó (kiểm tra mỗi 20 giây)</span>
+            </span>
+            <span class="text-[12px] font-medium text-slate-400 group-hover:text-rose-600 shrink-0">Mở</span>
+          </button>
           <div>
-            <label class="block text-[12px] font-medium text-slate-600 mb-1">Số bị sai, cần làm lại</label>
+            <label class="block text-[12px] font-medium text-slate-600 mb-1">Hoặc nhập số bị sai</label>
             <input v-model="redoNumbers" class="input font-mono" placeholder="vd: 5, 12, 30-33" @keydown.enter="redo" />
           </div>
           <input v-model="redoNote" class="input !text-[13px]" placeholder="Ghi chú cần sửa (không bắt buộc), vd: áo màu đỏ, không có chữ" />
           <button @click="redo" :disabled="busy || !redoNumbers.trim()" class="btn"><RotateCcw class="w-4 h-4" /> Làm lại các số này</button>
-          <p class="text-[11.5px] text-slate-400">File cũ của số đó được cất vào <span class="font-mono">_lam-lai</span>; bản mới về đúng tên số cũ.</p>
+          <p class="text-[11.5px] text-slate-400">File cũ được cất vào <span class="font-mono">lỗi\đã xử lý</span>; bản mới về đúng tên số cũ.</p>
         </section>
 
         <section class="card p-4 flex flex-col gap-3">
@@ -117,7 +126,7 @@
             <span class="text-[12px] font-medium text-slate-400 group-hover:text-indigo-600 shrink-0">Mở</span>
           </button>
           <p class="text-[12px] text-slate-500 leading-relaxed">
-            Đổi <span class="font-mono">005{{ ext }}</span> thành
+            Đổi <span class="font-mono">5{{ ext }}</span> thành
             <span class="font-mono">{{ isImage ? 'CHAR-CLARA-1.png' : 'EP06-S1-01.mp4' }}</span>
             ({{ isImage ? 'đúng Reference ID' : 'tên cảnh + số thứ tự trong cảnh' }}) và chuyển sang thư mục trên.
           </p>
@@ -127,6 +136,52 @@
           </button>
         </section>
       </div>
+
+      <!-- Duyệt nhanh: bấm chọn mục lỗi, rồi làm lại / duyệt hết phần còn lại -->
+      <section v-if="reviewItems.length" class="card">
+        <div class="p-3 flex flex-wrap items-center gap-3 border-b border-slate-100">
+          <div class="min-w-0">
+            <div class="card-title">Duyệt nhanh · {{ reviewItems.length }} {{ label.noun }} chờ duyệt</div>
+            <div class="text-[11.5px] text-slate-500">Bấm vào {{ label.noun }} sai để đánh dấu lỗi (bấm lại để bỏ). Kính lúp để xem to.</div>
+          </div>
+          <div class="ml-auto flex flex-wrap items-center gap-2">
+            <template v-if="errSel.size">
+              <span class="text-[12.5px] font-semibold text-rose-700">Đã chọn {{ errSel.size }} lỗi</span>
+              <button class="btn-ghost btn-sm" @click="errSel = new Set()">Bỏ chọn</button>
+              <input v-model="errNote" class="input !py-1.5 !text-[12.5px] !w-64" placeholder="Ghi chú cần sửa (không bắt buộc)" />
+              <button class="btn btn-sm !border-rose-200 !text-rose-700 hover:!bg-rose-50" :disabled="busy" @click="redoSelected">
+                <RotateCcw class="w-3.5 h-3.5" /> Làm lại {{ errSel.size }} {{ label.noun }} lỗi
+              </button>
+            </template>
+            <button class="btn-success btn-sm" :disabled="busy" @click="approveRest">
+              <CheckCheck class="w-3.5 h-3.5" />
+              {{ errSel.size ? `Duyệt ${reviewItems.length - errSel.size} ${label.noun} còn lại` : `Duyệt hết ${reviewItems.length} ${label.noun}` }}
+            </button>
+          </div>
+        </div>
+        <div class="p-3 grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))">
+          <div v-for="j in reviewPage" :key="j.id" @click="toggleErr(j)"
+            class="group relative rounded-xl overflow-hidden border-2 cursor-pointer bg-slate-900 transition"
+            :class="errSel.has(j.id) ? 'border-rose-500 ring-2 ring-rose-200' : 'border-transparent hover:border-indigo-300'">
+            <img v-if="j.previewType === 'image'" :src="jobsApi.previewUrl(j)" loading="lazy" class="w-full aspect-video object-cover"
+              :class="errSel.has(j.id) ? 'opacity-60' : ''" />
+            <video v-else :src="jobsApi.previewUrl(j)" muted preload="metadata" class="w-full aspect-video object-cover"
+              :class="errSel.has(j.id) ? 'opacity-60' : ''"></video>
+            <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-slate-900/75 text-white text-[12px] font-semibold tabular-nums">{{ j.reviewNo }}</span>
+            <span v-if="errSel.has(j.id)" class="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-rose-600 text-white text-[11px] font-semibold">Lỗi</span>
+            <button v-else @click.stop="preview = j" title="Xem to"
+              class="absolute top-1.5 right-1.5 w-7 h-7 rounded-md bg-white/90 text-slate-700 hidden group-hover:flex items-center justify-center">
+              <ZoomIn class="w-4 h-4" />
+            </button>
+            <div class="px-2 py-1 bg-white text-[11px] font-mono text-slate-600 truncate" :title="j.finalName">{{ j.finalName }}</div>
+          </div>
+        </div>
+        <div v-if="reviewPages > 1" class="flex items-center justify-center gap-2 pb-3">
+          <button @click="reviewPg = Math.max(1, reviewPg - 1)" :disabled="reviewPg === 1" class="btn btn-sm">‹ Trước</button>
+          <span class="text-sm text-slate-600">Trang {{ reviewPg }} / {{ reviewPages }}</span>
+          <button @click="reviewPg = Math.min(reviewPages, reviewPg + 1)" :disabled="reviewPg === reviewPages" class="btn btn-sm">Sau ›</button>
+        </div>
+      </section>
 
       <!-- Danh sách -->
       <section class="card">
@@ -174,6 +229,9 @@
                   </td>
                   <td class="px-3 py-2">
                     <div class="font-mono text-slate-800">{{ j.finalName }}</div>
+                    <div v-if="isImage && j.references.some((r) => !r.available) && j.status === 'PENDING'" class="text-[11px] text-amber-700">
+                      chờ ảnh gốc {{ j.references.filter((r) => !r.available).map((r) => r.id).join(', ') }} được đổi tên
+                    </div>
                     <div v-if="!isImage && j.summaryVi" class="text-[11.5px] text-slate-500 truncate max-w-[420px]" :title="j.summaryVi">{{ firstLine(j.summaryVi) }}</div>
                   </td>
                   <td class="px-3 py-2">
@@ -249,7 +307,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   AlertTriangle, CheckCheck, CheckCircle2, ChevronDown, ChevronUp, ClipboardPaste, Clock, FileSpreadsheet, FolderCheck, FolderInput,
-  FolderOpen, Image as ImageIcon, Info, Layers, Loader2, Pause, Play, PlayCircle, RefreshCw, RotateCcw, Save, Search, UserX, Video, X,
+  FolderOpen, FolderX, Image as ImageIcon, Info, Layers, Loader2, Pause, Play, PlayCircle, RefreshCw, RotateCcw, Save, Search, UserX, Video, X, ZoomIn,
 } from 'lucide-vue-next'
 import StatusBadge from '@/components/StatusBadge.vue'
 import RefStrip from '@/components/RefStrip.vue'
@@ -310,8 +368,7 @@ const filterOptions = [
   { value: 'CANCELLED', label: 'Đã hủy / có sẵn' },
 ]
 
-const width = computed(() => Math.max(3, String(items.value.length || 1).length))
-const pad = (n) => String(n ?? '').padStart(width.value, '0')
+const pad = (n) => String(n ?? '')
 const firstLine = (s) => String(s).split('\n').filter((l) => l.trim()).slice(0, 2).join(' · ')
 
 /** "5, 10-20" → tìm theo số; còn lại tìm theo tên / ghi chú. */
@@ -373,6 +430,66 @@ async function redo() {
   }
 }
 
+// ----- Duyệt nhanh -----
+const REVIEW_PAGE = 60
+const errSel = ref(new Set())
+const errNote = ref('')
+const reviewPg = ref(1)
+const reviewItems = computed(() => items.value.filter((j) => j.status === 'AWAITING_REVIEW' && j.hasPreview))
+const reviewPages = computed(() => Math.max(1, Math.ceil(reviewItems.value.length / REVIEW_PAGE)))
+const reviewPage = computed(() => reviewItems.value.slice((reviewPg.value - 1) * REVIEW_PAGE, reviewPg.value * REVIEW_PAGE))
+watch(reviewPages, (n) => { if (reviewPg.value > n) reviewPg.value = n })
+// mục đã rời trạng thái chờ duyệt (đang làm lại / đã đổi tên) thì bỏ khỏi lựa chọn
+watch(reviewItems, (list) => {
+  const ids = new Set(list.map((j) => j.id))
+  if ([...errSel.value].some((id) => !ids.has(id))) errSel.value = new Set([...errSel.value].filter((id) => ids.has(id)))
+})
+function toggleErr(j) {
+  const next = new Set(errSel.value)
+  if (next.has(j.id)) next.delete(j.id)
+  else next.add(j.id)
+  errSel.value = next
+}
+const selectedNumbers = () => reviewItems.value.filter((j) => errSel.value.has(j.id)).map((j) => j.reviewNo).join(',')
+
+async function redoSelected() {
+  if (!errSel.value.size) return
+  const r = await run(() => batchApi.redo(pid(), part.value, selectedNumbers(), errNote.value),
+    (x) => `Đang làm lại ${x.queued} ${label.value.noun} lỗi`)
+  if (r) {
+    errSel.value = new Set()
+    errNote.value = ''
+  }
+}
+
+/** Duyệt hết: mục đánh dấu lỗi đi làm lại, mọi mục còn lại đổi tên sang thư mục đích. */
+async function approveRest() {
+  const nErr = errSel.value.size
+  const nOk = reviewItems.value.length - nErr
+  let msg = `Duyệt ${nOk} ${label.value.noun}: đổi tên và chuyển sang\n${targetDir.value}`
+  if (nErr) msg += `\n\n${nErr} ${label.value.noun} đánh dấu lỗi sẽ được làm lại.`
+  if (!confirm(msg)) return
+  busy.value = true
+  try {
+    let redone = 0
+    if (nErr) {
+      redone = (await batchApi.redo(pid(), part.value, selectedNumbers(), errNote.value)).queued
+      errSel.value = new Set()
+      errNote.value = ''
+    }
+    const r = await batchApi.finalize(pid(), part.value)
+    store.toast(`Đã duyệt và đổi tên ${r.renamed} ${label.value.noun} → ${r.targetDir}`
+      + (redone ? `\nĐang làm lại ${redone} ${label.value.noun} lỗi` : '')
+      + (r.resumed ? `\nChạy tiếp ${r.resumed} ${label.value.noun} đang chờ ảnh gốc` : '')
+      + (r.errors.length ? `\nLỗi ${r.errors.length}: ${r.errors.slice(0, 3).join('; ')}` : ''), r.errors.length ? 'error' : 'success')
+    await Promise.all([store.refresh(), load()])
+  } catch (e) {
+    store.toast(errMsg(e), 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
 const redoOne = (j) => run(() => batchApi.redo(pid(), part.value, String(j.reviewNo), ''), `Đang làm lại số ${pad(j.reviewNo)}`)
 const cancel = (j) => run(() => jobsApi.cancel(j.id), `Đã yêu cầu dừng số ${pad(j.reviewNo)}`)
 
@@ -382,12 +499,25 @@ async function finalizeAll() {
   if (notReady.value) msg += `\n\n${notReady.value} ${label.value.noun} chưa xong sẽ giữ lại, đổi tên sau.`
   if (!confirm(msg)) return
   await run(() => batchApi.finalize(pid(), part.value), (r) => `Đã đổi tên ${r.renamed} file → ${r.targetDir}`
+    + (r.resumed ? `\nChạy tiếp ${r.resumed} ${label.value.noun} đang chờ ảnh gốc` : '')
     + (r.errors.length ? `\nLỗi ${r.errors.length}: ${r.errors.slice(0, 3).join('; ')}` : ''))
 }
 
 async function openReview() {
   try {
     await batchApi.openReview(pid(), part.value)
+  } catch (e) {
+    store.toast(errMsg(e), 'error')
+  }
+}
+async function openErrors() {
+  try {
+    await batchApi.openErrors(pid(), part.value)
+    const r = await batchApi.scanErrors(pid(), part.value)
+    if (r.queued) {
+      store.toast(`Đang làm lại ${r.queued} ${label.value.noun} từ thư mục lỗi: ${r.files.join(', ')}`, 'success')
+      await Promise.all([store.refresh(), load()])
+    }
   } catch (e) {
     store.toast(errMsg(e), 'error')
   }

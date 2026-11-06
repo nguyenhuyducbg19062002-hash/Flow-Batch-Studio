@@ -6,7 +6,7 @@
     "IMAGE": "TODO",
     "VIDEO": "TODO"
   },
-  "settings_button": "[aria-label='Settings trigger'], [aria-label='Cài đặt'], [aria-label='Trình kích hoạt cài đặt']",
+  "settings_button": "button:has(mat-icon:text-matches('^crop_')), [aria-label='Settings trigger'], [aria-label='Cài đặt'], [aria-label='Trình kích hoạt cài đặt']",
   "settings_save": "button:has-text('Lưu'), button:has-text('Save')",
   "agent_never_confirm": "^\\s*(Không bao giờ|Never)(\\s|$)",
   "add_reference_button": "[aria-label='Thêm thành phần vào ô nhập câu lệnh'], [aria-label='Add ingredients to the prompt box']",

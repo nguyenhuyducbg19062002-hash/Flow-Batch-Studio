@@ -2,8 +2,8 @@
 
 Tạo ảnh và video **hàng loạt** trên Google Flow, tách thành hai phần riêng (**Tạo ảnh**, **Tạo video**) chạy cùng một quy trình:
 
-1. **Chạy**: app tạo hết, tải từng kết quả về **thư mục chờ duyệt**, đặt tên theo số thứ tự đúng thứ tự file prompt (`001.png`, `002.png`… / `001.mp4`…).
-2. **Duyệt trong thư mục**: nhân viên mở thư mục xem; số nào sai thì nhập vào ô "Số bị sai" (ví dụ `5, 12, 30-33`, kèm ghi chú cần sửa nếu muốn) → app tạo lại đúng các số đó. File cũ được cất vào `_lam-lai`, bản mới về đúng tên số cũ.
+1. **Chạy**: app tạo hết, tải từng kết quả về **thư mục chờ duyệt**, đặt tên theo số thứ tự đúng thứ tự file prompt (`1.png`, `2.png`, `3.png`… / `1.mp4`…).
+2. **Duyệt trong thư mục**: nhân viên mở thư mục xem; file nào sai thì **kéo vào thư mục con `lỗi`** → app (kiểm tra mỗi 20 giây) tự tạo lại đúng số đó, file cũ được cất vào `lỗi\đã xử lý`, bản mới về đúng tên số cũ. Cũng có thể nhập số ở ô "Hoặc nhập số bị sai" (`5, 12, 30-33`, kèm ghi chú).
 3. **Đổi tên**: ổn hết thì bấm "Đổi tên N file": mọi file được đổi sang tên đúng và chuyển vào thư mục đích:
    - ảnh → Folder Ảnh, tên = Reference ID (`CHAR-CLARA-1.png`, `LOC-1.png`);
    - video → Folder Video, tên = tên cảnh + số trong cảnh (`EP06-S1-01.mp4`), lấy từ cột Ghi chú "Cảnh EP06-S1".
@@ -20,7 +20,7 @@ Thiết kế gốc (state machine, DB, xoay vòng tài khoản): [docs/ARCHITECT
    "Nạp cả thư mục phim" nạp một lần cả Excel ảnh, Excel video và ảnh có sẵn.
 4. **Tạo ảnh**:
    - Nạp `reference-prompts.xlsx` (cột Reference ID + Prompt tạo reference) hoặc **Dán prompt** (`ID: prompt`, mỗi dòng / mỗi khối cách dòng trống một ảnh).
-   - Ảnh đổi đồ (OUTFIT VARIANT, ví dụ CHAR-CLARA-2 tạo từ CHAR-CLARA-1) tự gắn ảnh gốc nhắc trong prompt; ảnh gốc được tạo trước và dùng ngay bản trong thư mục chờ duyệt. Thêm ảnh tham chiếu tay bằng nút "+" ở từng dòng (mở "Chi tiết").
+   - Ảnh đổi đồ (OUTFIT VARIANT, ví dụ CHAR-CLARA-2 tạo từ CHAR-CLARA-1) gắn @ảnh gốc. **Chỉ ảnh đã duyệt và Đổi tên sang Ảnh tham chiếu mới được tag @** (file đúng tên ID thì Flow mới tìm được chip). Lượt 1 tạo ảnh gốc; ảnh đổi đồ chờ; bấm "Đổi tên" xong app tự chạy tiếp ảnh đổi đồ. Thêm ảnh tham chiếu tay bằng nút "+" ở từng dòng (mở "Chi tiết").
    - ▶ Chạy tạo ảnh → duyệt thư mục → làm lại số sai → **Đổi tên**.
 5. **Tạo video**:
    - Nạp `all-video-prompts.xlsx` hoặc dán prompt. Mỗi `@ID` trong prompt được upload từ Folder Ảnh và gắn thành chip ảnh trên Flow, đúng thứ tự khai báo.

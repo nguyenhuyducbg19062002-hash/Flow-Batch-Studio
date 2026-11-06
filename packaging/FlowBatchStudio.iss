@@ -43,13 +43,18 @@ Name: "desktopicon"; Description: "Tạo biểu tượng ngoài Desktop"
 
 [Files]
 Source: "{#ImageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\HUONG-DAN.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+; Thư mục extension Chrome: người dùng "Load unpacked" chọn đúng thư mục này
+Name: "{autoprograms}\{#AppName} - Extension Chrome"; Filename: "{app}\engine\flow_ext\extension"
+Name: "{autoprograms}\{#AppName} - Hướng dẫn"; Filename: "{app}\HUONG-DAN.txt"
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Mở {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\HUONG-DAN.txt"; Description: "Xem hướng dẫn cài extension Chrome"; Flags: postinstall shellexec skipifsilent unchecked
 
 [UninstallRun]
 ; Tắt cả cây tiến trình: Java → Python worker → Edge do Playwright mở

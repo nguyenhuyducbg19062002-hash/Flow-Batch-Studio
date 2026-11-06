@@ -43,8 +43,10 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     /**
      * Việc kế tiếp của một phim khi ảnh và video chạy RIÊNG (images / videos = 1: phần đó đang bật).
      * Mục được làm lại / chạy riêng (run_priority > 0) đi trước, rồi theo đúng thứ tự file (= số thứ tự trong thư mục chờ duyệt).
-     *  - Ảnh: chạy khi mọi ảnh nó cần (ảnh gốc của ảnh đổi đồ) đã có trong kho, kể cả ảnh còn trong thư mục chờ duyệt (REVIEW).
-     *  - Video: phải có ảnh tham chiếu, và mọi ảnh đó đã được đổi tên sang Folder Ảnh / có sẵn (không dùng ảnh chưa duyệt).
+     *  - Ảnh tag @ (ảnh gốc của ảnh đổi đồ, ảnh tham chiếu của video) phải đã được duyệt và "Đổi tên" sang Folder Ảnh
+     *    (hoặc là ảnh có sẵn): file mang đúng tên ID, Flow giữ tên file nên mới tìm được để gắn chip @ID.
+     *    Ảnh còn trong thư mục chờ duyệt (1.png, 2.png…) KHÔNG được dùng.
+     *  - Video: phải có ảnh tham chiếu.
      * selectedOnly = 1: chỉ các mục được chọn chạy riêng.
      */
     @Query(value = """
@@ -59,7 +61,7 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
                   WHERE r.video_prompt_id = p.id
                     AND NOT EXISTS (SELECT 1 FROM project_assets a
                                     WHERE a.project_id = p.project_id AND a.external_id = r.ref_external_id
-                                      AND (p.kind = 'IMAGE' OR a.source <> 'REVIEW')))
+                                      AND a.source <> 'REVIEW'))
             ORDER BY COALESCE(j.run_priority, 0) DESC, CASE p.kind WHEN 'IMAGE' THEN 0 ELSE 1 END,
                      COALESCE(p.source_order, 0), p.seq_no
             LIMIT 1""", nativeQuery = true)

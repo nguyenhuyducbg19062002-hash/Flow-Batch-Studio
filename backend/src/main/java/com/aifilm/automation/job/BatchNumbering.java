@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Số thứ tự của từng mục trong thư mục chờ duyệt: 001.png, 002.png… (video: 001.mp4…).
+ * Số thứ tự của từng mục trong thư mục chờ duyệt: 1.png, 2.png… (video: 1.mp4…).
  * Đánh theo đúng thứ tự trong file Excel (thứ tự file đã nạp, rồi STT / thứ tự dòng), bắt đầu từ 1, riêng cho ảnh và video.
  * Người duyệt mở thư mục, thấy số nào sai thì báo lại đúng số đó để app tạo lại.
  */
@@ -42,8 +42,8 @@ public final class BatchNumbering {
         return Math.max(3, String.valueOf(Math.max(total, 1)).length());
     }
 
-    /** Tên file (không đuôi) của số no: 5 → "005". */
+    /** Tên file (không đuôi) của số no: 5 → "5" (Explorer sắp 1, 2, …, 10 đúng thứ tự). */
     public static String baseName(int no, int total) {
-        return String.format("%0" + width(total) + "d", no);
+        return String.valueOf(no);
     }
 }

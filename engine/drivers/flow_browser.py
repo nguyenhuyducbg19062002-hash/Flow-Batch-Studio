@@ -34,6 +34,7 @@ from .errors import (AccountBroken, AuthRequired, BotSuspected, Cancelled, Confi
 from .flow_session import SessionRunner, Tile
 from .helper_overlay import open_in_explorer, overlay_script, prepare_refs_folder
 from .stealth import browser_name, detect_and_solve_turnstile, human_click, human_type, launch_profile, send_prompt
+from . import pace as pace_mod
 
 FLOW_URL = "https://flow.google.com/"
 VIDEO_QUALITIES = ["1080p", "720p", "480p", "360p"]   # từ cao xuống thấp
@@ -121,6 +122,32 @@ def _is_todo(v) -> bool:
     return v is None or (isinstance(v, str) and (not v.strip() or v.startswith("TODO")))
 
 
+# (dự án Flow, loại, model, tỉ lệ, thinking, chất lượng, độ dài) đã được cài môi trường đầy đủ trong tiến trình worker này
+_ENV_READY: set = set()
+
+# Nút chip cạnh ô prompt mở bảng cài đặt ("🍌 Nano Banana 2.1 ▭ x2"; xác nhận 2026-11-06 qua DevTools: <button> chứa
+# <mat-icon>crop_16_9</mat-icon>). KHÔNG dùng nút ⚙ trên thanh trên cùng (đó là cài đặt dự án).
+SETTINGS_CHIP = "button:has(mat-icon:text-matches('^crop_'))"
+
+
+def chip_state(text: str) -> dict:
+    """Đọc chữ trên chip: model, tỉ lệ (crop_16_9 → 16:9), số bản (x2)."""
+    t = " ".join((text or "").split())
+    m_ratio = re.search(r"crop_(\d+)_(\d+)", t)
+    m_count = re.search(r"(?:^|\s)x(\d)(?:\s|$)", t)
+    model = re.sub(r"crop_\w+|(?:^|\s)x\d(?=\s|$)|arrow_drop_down|[^\w\s.:-]", " ", t)
+    return {"ratio": f"{m_ratio.group(1)}:{m_ratio.group(2)}" if m_ratio else None,
+            "count": int(m_count.group(1)) if m_count else None,
+            "model": " ".join(model.split()), "text": t}
+
+# Thinking level trong bảng cài đặt ảnh (giao diện có thể là tiếng Anh hoặc tiếng Việt)
+THINKING_LEVELS = {
+    "low": r"^\s*(Low|Thấp)\s*$",
+    "medium": r"^\s*(Medium|Trung bình)\s*$",
+    "high": r"^\s*(High|Cao)\s*$",
+}
+
+
 class _SessionOps:
     """FlowOps thật cho SessionRunner (docs/SONG-SONG.md): đọc lưới ô, gửi lệnh, tải kết quả, đọc thông báo lỗi của trang."""
 
@@ -138,7 +165,7 @@ class _SessionOps:
             const isVideo = !!c.querySelector('video, flow-video-tile');
             const uploaded = !busy && !isVideo && imgOk && /[.](png|jpe?g|webp|gif|bmp)$/i.test(label);
             // ô lỗi của Flow: chữ "Failed" ở đầu + lý do, không có % / vòng quay (đã thấy: "We noticed some unusual activity…")
-            const failed = !busy && /^\\s*(\\S{0,3}\\s*)?failed\\b/i.test(c.innerText || '');
+            const failed = !busy && /^\\s*(\\S{0,12}\\s*)?(failed\\b|không thành công)/i.test(c.innerText || '');
             return {c, label, m, busy, imgOk, uploaded, failed, err: failed ? (c.innerText || '').replace(/\\s+/g, ' ').trim() : ''};
         }).filter(x => !x.uploaded).map(x => {
             const k = keyOf(x.c); if (k) x.c.setAttribute('data-afm-key', k);
@@ -475,7 +502,103 @@ class FlowBrowserDriver:
         need = ["video", str(job.get("videoQuality") or DEFAULT_VIDEO_QUALITY).lower(), "x1"]
         if job.get("durationSeconds"):
             need.append(f"{int(job['durationSeconds'])}s")
-        return all(n in tokens for n in need)
+        # chip có ghi tỉ lệ ("16:9") thì tỉ lệ cũng phải đúng; chip chỉ hiện biểu tượng tỉ lệ thì không xét được, bỏ qua
+        if job.get("aspectRatio") and any(re.fullmatch(r"\d+:\d+", t) for t in tokens):
+            need.append(str(job["aspectRatio"]).strip().lower())
+        model = (job.get("flowModel") or "").strip().lower()
+        return all(n in tokens for n in need) and (not model or model in text)
+
+    # Lựa chọn trong bảng cài đặt đang được chọn chưa (Flow / Angular Material đánh dấu bằng aria-* hoặc class).
+    _IS_ON_JS = """(el) => {
+        const on = (e) => !!e && (['aria-checked', 'aria-selected', 'aria-pressed'].some(a => e.getAttribute(a) === 'true')
+            || ['on', 'checked', 'active', 'selected'].includes((e.getAttribute('data-state') || '').toLowerCase())
+            || /(^|[\\s_-])(selected|active|checked)([\\s_-]|$)/i.test(e.className && e.className.baseVal !== undefined ? e.className.baseVal : (e.className || '')));
+        return on(el) || on(el.closest('[role=radio],[role=tab],[role=option],button'));
+    }"""
+
+    @staticmethod
+    def _is_on(loc) -> bool:
+        try:
+            return bool(loc.evaluate(FlowBrowserDriver._IS_ON_JS))
+        except Exception:   # không đọc được trạng thái: coi như chưa chọn, bấm cho chắc
+            return False
+
+    # Tên các dòng model của Flow, để nhận ra nút mở danh sách model trong bảng cài đặt ("Nano Banana 2.1 ▾", "Veo 3.1 - Fast ▾").
+    _MODEL_FAMILY = r"(nano\s*banana|imagen|veo|gemini)"
+
+    @staticmethod
+    def _pick_model(page, model: str, p, chosen: list) -> None:
+        """
+        Chọn model trong bảng cài đặt (ô thả xuống dưới tỉ lệ khung). Đang đúng model thì bỏ qua. Không tìm thấy thì giữ model
+        hiện tại và ghi log (không chặn việc tạo).
+        """
+        want = re.compile(re.escape(model), re.I)
+        fam = re.compile(FlowBrowserDriver._MODEL_FAMILY, re.I)
+        overlay = page.locator(".cdk-overlay-container, [role=dialog], [role=menu]")
+        trigger = None
+        for loc in (overlay.get_by_role("combobox"), overlay.locator("button[aria-haspopup]"), overlay.get_by_role("button")):
+            try:
+                cand = loc.filter(has_text=fam)
+                if cand.count():
+                    trigger = cand.first
+                    break
+            except PlaywrightError:
+                continue
+        if trigger is None:
+            log.warning("Không thấy ô chọn model trong bảng cài đặt Flow: giữ model hiện tại")
+            return
+        try:
+            if want.search(trigger.inner_text(timeout=2_000) or ""):
+                chosen.append(f"model {model} (đã đúng)")
+                return
+            p.pause(page, 0.4, 0.9)
+            trigger.click(timeout=5_000)
+            page.wait_for_timeout(300)
+            p.pause(page, 0.3, 0.7)
+            for role in ("option", "menuitemradio", "menuitem", "radio"):
+                opt = page.get_by_role(role, name=want)
+                if opt.count():
+                    opt.first.click(timeout=5_000)
+                    page.wait_for_timeout(300)
+                    p.pause(page, 0.2, 0.5)
+                    chosen.append(f"model {model}")
+                    return
+            page.keyboard.press("Escape")   # đóng danh sách model, giữ bảng cài đặt
+            log.warning("Flow không có model \"%s\" trong danh sách: giữ model hiện tại", model)
+        except PlaywrightError as e:
+            log.warning("Không chọn được model %s: %s", model, str(e)[:200])
+
+    @staticmethod
+    def _settings_button(page, s: dict):
+        """Nút mở bảng cài đặt: chip cạnh ô prompt (có biểu tượng crop_…); không thấy thì dùng selector trong selectors.json."""
+        chip = page.locator(SETTINGS_CHIP)
+        try:
+            if chip.count():
+                return chip
+        except PlaywrightError:
+            pass
+        return page.locator(s["settings_button"])
+
+    @staticmethod
+    def _chip_ok(page, s: dict, kind: str, job: dict) -> bool:
+        """
+        Đọc chip (không mở bảng): đúng loại (model ảnh / video), đúng model, đúng tỉ lệ và x1 thì coi là đúng.
+        Thinking level không hiện trên chip: chỉ tin chip khi môi trường đã được kiểm tra đầy đủ một lần trong phiên này.
+        """
+        try:
+            st = chip_state(FlowBrowserDriver._settings_button(page, s).last.inner_text(timeout=2_000))
+        except Exception:   # không đọc được chip: coi như chưa đúng, mở bảng cài đặt kiểm tra
+            return False
+        low = st["text"].lower()
+        model = (job.get("flowModel") or "").strip().lower()
+        is_video_chip = "veo" in low or "video" in low
+        if (kind == "VIDEO") != is_video_chip:
+            return False
+        if model and model not in low:
+            return False
+        if job.get("aspectRatio") and st["ratio"] and st["ratio"] != str(job["aspectRatio"]).strip():
+            return False
+        return st["count"] == 1
 
     @staticmethod
     def _apply_settings(page, s: dict, kind: str, job: dict | None = None):
@@ -483,10 +606,12 @@ class FlowBrowserDriver:
         Bảng cài đặt cạnh ô prompt. Flow có 2 bố cục:
         - Tác nhân (bảng chat bên phải): "Xác nhận trước khi tạo" → "Không bao giờ" (Tác nhân khỏi hỏi lại), số bản tạo
           ảnh / video = x1, rồi bấm Lưu.
-        - Tạo trực tiếp (chip "Nano Banana 2.1 · 16:9 · x2"): chọn Image / Video, x1; bảng tự áp dụng, Esc để đóng.
-        Mọi bước là "cố gắng": không có nút nào thì bỏ qua, không chờ lâu.
+        - Tạo trực tiếp (chip "Nano Banana 2.1 · 16:9 · x2"): chọn Image / Video, tỉ lệ khung của phim, x1; bảng tự áp dụng,
+          Esc để đóng.
+        Mọi bước là "cố gắng": không có nút nào thì bỏ qua, không chờ lâu. Mỗi cú bấm dừng ngẫu nhiên vừa phải như người thật.
         """
-        btn = page.locator(s["settings_button"])
+        p = pace_mod.Pace(pace_mod.factor(job)) if job else pace_mod.NONE
+        btn = FlowBrowserDriver._settings_button(page, s)
         try:
             btn.first.wait_for(state="attached", timeout=8_000)
         except PlaywrightError:
@@ -498,10 +623,35 @@ class FlowBrowserDriver:
             log.info("Cài đặt Flow đã đúng (video, %s, x1): bỏ qua bước mở popover", job.get("videoQuality") or DEFAULT_VIDEO_QUALITY)
             return
         try:
+            p.pause(page, 0.4, 1.0)
             btn.last.click(timeout=5_000)
 
             def radio(pattern: str):
-                return page.get_by_role("radio", name=re.compile(pattern, re.I))
+                """Lựa chọn trong bảng cài đặt: radio, không có thì tab / nút cùng tên (Flow vẽ khác nhau theo bố cục)."""
+                rx = re.compile(pattern, re.I)
+                for role in ("radio", "tab", "menuitemradio", "button"):
+                    loc = page.get_by_role(role, name=rx)
+                    try:
+                        if loc.count():
+                            return loc
+                    except PlaywrightError:
+                        continue
+                return page.get_by_role("radio", name=rx)
+
+            def pick(opt, label: str) -> None:
+                """Lựa chọn đã đúng thì KHÔNG bấm (thao tác hợp lý như người thật); sai thì bấm sửa, dừng vừa phải trước và sau."""
+                if FlowBrowserDriver._is_on(opt):
+                    chosen.append(label + " ✓")
+                    return
+                p.pause(page, 0.35, 0.9)
+                opt.click(timeout=5_000)
+                page.wait_for_timeout(200)
+                p.pause(page, 0.2, 0.5)
+                chosen.append(label)
+                fixed.append(label)
+
+            chosen: list[str] = []
+            fixed: list[str] = []
 
             try:
                 page.get_by_role("radio").first.wait_for(state="visible", timeout=3_000)   # popover mở xong
@@ -509,13 +659,36 @@ class FlowBrowserDriver:
                 pass
             page.wait_for_timeout(200)
 
+            p.pause(page, 0.3, 0.7)   # nhìn bảng cài đặt vừa mở
             never = radio(s.get("agent_never_confirm") or r"^\s*(Không bao giờ|Never)(\s|$)")
             if never.count():
-                never.first.click(timeout=5_000)
+                pick(never.first, "không hỏi lại")
             mode = radio(r"^\W*(image\s+)?(Hình ảnh|Image)\s*$" if kind == "IMAGE" else r"^\W*(videocam\s+)?Video\s*$")
             if mode.count():
-                mode.first.click(timeout=5_000)
-                page.wait_for_timeout(300)
+                pick(mode.first, "ảnh" if kind == "IMAGE" else "video")
+                page.wait_for_timeout(100)
+            # chọn MÔ HÌNH ngay sau tab Hình ảnh / Video (đổi model có thể làm bảng vẽ lại các lựa chọn bên dưới)
+            model = ((job or {}).get("flowModel") or "").strip()
+            if model:
+                before_n = len(chosen)
+                FlowBrowserDriver._pick_model(page, model, p, chosen)
+                fixed.extend(c for c in chosen[before_n:] if not c.endswith("(đã đúng)"))
+                page.wait_for_timeout(200)
+            ratio = (job or {}).get("aspectRatio")
+            if ratio:
+                # Tỉ lệ khung của phim (16:9, 9:16, 1:1…): tên nút có thể kèm biểu tượng ("crop_16_9 16:9")
+                opt = radio(rf"(^|[^0-9]){re.escape(str(ratio).strip())}([^0-9]|$)")
+                if opt.count():
+                    pick(opt.first, f"tỉ lệ {ratio}")
+                else:
+                    log.warning("Flow không có lựa chọn tỉ lệ %s: giữ tỉ lệ hiện tại", ratio)
+            thinking = ((job or {}).get("flowThinking") or "").strip().lower()
+            if kind == "IMAGE" and thinking in THINKING_LEVELS:
+                opt = radio(THINKING_LEVELS[thinking])
+                if opt.count():
+                    pick(opt.first, f"thinking {thinking}")
+                else:
+                    log.warning("Không thấy lựa chọn Thinking level %s: giữ mặc định", thinking)
             if kind == "VIDEO" and job:
                 # Popover bố cục tạo trực tiếp (xác nhận 2026-11-04): nhóm radio độ phân giải (360p/720p) và độ dài (4s/6s/8s/10s).
                 # Giá trị Flow không có thì giữ nguyên lựa chọn hiện tại.
@@ -528,24 +701,30 @@ class FlowBrowserDriver:
                 for label, pattern in wanted:
                     opt = radio(pattern)
                     if opt.count():
-                        opt.first.click(timeout=5_000)
-                        page.wait_for_timeout(300)
+                        pick(opt.first, label)
                     else:
                         log.warning("Flow không có lựa chọn %s %s: giữ mặc định", label, pattern)
             x1 = radio(r"^\s*x1\s*$")
             if x1.count():
                 # bố cục Tác nhân có 2 nhóm x1: nhóm đầu cho ảnh, nhóm sau cho video
-                (x1.nth(1) if kind == "VIDEO" and x1.count() > 1 else x1.first).click(timeout=5_000)
-            page.wait_for_timeout(300)
+                pick(x1.nth(1) if kind == "VIDEO" and x1.count() > 1 else x1.first, "x1")
+            page.wait_for_timeout(100)
+            p.pause(page, 0.4, 1.0)   # xem lại rồi mới đóng bảng
             save = page.locator(s.get("settings_save") or "button:has-text('Lưu'), button:has-text('Save')")
             if save.count() and save.first.is_visible():
                 save.first.click(timeout=5_000)
             else:
                 page.keyboard.press("Escape")
             page.wait_for_timeout(600)
+            if fixed:
+                log.info("Môi trường Flow (%s): đã sửa %s | %s", kind, ", ".join(fixed), ", ".join(chosen))
+            else:
+                log.info("Môi trường Flow (%s) đã đúng: %s", kind, ", ".join(chosen) or "không có lựa chọn nào")
+            return fixed
         except PlaywrightError as e:
             log.warning("Không đặt được cài đặt Flow (x1 / chế độ): %s", str(e)[:200])
             page.keyboard.press("Escape")
+        return []
 
     @staticmethod
     def _listbox_text(page, s: dict) -> str:
@@ -572,6 +751,7 @@ class FlowBrowserDriver:
             return False
         if should_stop and should_stop():
             raise Cancelled("Người dùng hủy job")
+        self._pace.pause(page, 0.5, 1.2)
         page.locator(s["add_reference_button"]).first.click()
         try:
             page.locator(s["ingredient_listbox"]).first.wait_for(state="visible", timeout=3_000)
@@ -582,6 +762,7 @@ class FlowBrowserDriver:
         need = [img for img in images if self._nfc(Path(img).name) not in have]
         if need:
             log.info("Tải lên Flow %d ảnh: %s", len(need), ", ".join(Path(i).name for i in need))
+            self._pace.pause(page, 0.6, 1.4)
             with page.expect_file_chooser() as fc:
                 page.locator(s["upload_button"]).first.click()
             fc.value.set_files(need)
@@ -599,8 +780,10 @@ class FlowBrowserDriver:
                     raise TransientError("Quá 180s chưa tải xong ảnh reference lên Flow")
         else:
             log.info("Ảnh reference đã có sẵn trong dự án Flow, không tải lại")
+        self._pace.pause(page, 0.4, 1.0)
         page.keyboard.press("Escape")
         page.wait_for_timeout(150)
+        self._pace.pause(page, 0.3, 0.8)
         return bool(need)
 
     @staticmethod
@@ -615,21 +798,27 @@ class FlowBrowserDriver:
     def _compose_prompt(self, page, s: dict, prompt: str, ref_ids: list[str], mention_all: bool = False) -> set[str]:
         """
         Gõ prompt vào ô của Flow; mỗi "@ID" của ảnh reference thành chip mention:
-        Chèn nhanh prompt (như copy-paste kịch bản vào) và gắn nhanh @tag để tiết kiệm thời gian cho prompt dài.
+        Prompt được DÁN thẳng (như Ctrl+V kịch bản vào), còn @tag thì gắn chậm rãi như người thật: dừng, gõ "@", gõ tên ảnh
+        từng ký tự, nhìn danh sách gợi ý rồi mới bấm chọn. Nhịp lấy từ self._pace (0 = không dừng).
         """
+        p = self._pace
         box = page.locator(s["prompt_box"]).first
+        p.pause(page, 0.5, 1.2)
         try:
             box.click(timeout=5_000)
         except PlaywrightError:
             box.focus()
+        p.pause(page, 0.2, 0.5)
         page.keyboard.press("Control+A")
         page.keyboard.press("Delete")
+        p.pause(page, 0.3, 0.7)
 
         ids = sorted({i for i in ref_ids if i}, key=len, reverse=True)
         if mention_all:   # chỉ prompt ảnh (biến thể trang phục): prompt video giữ nguyên như cũ
             prompt = self._mention_unmentioned_refs(prompt, ids)
         if not ids:
             page.keyboard.insert_text(prompt)
+            p.pause(page, 0.6, 1.5)
             return set()
 
         pattern = self._ref_pattern(ids)
@@ -643,18 +832,22 @@ class FlowBrowserDriver:
 
             ref = m.group(1)
 
-            # 2. Gõ phím @ và tên tag nhanh để Flow mở và lọc danh sách gợi ý
+            # 2. Gắn @tag chậm rãi: dừng, gõ "@", chờ danh sách hiện, gõ tên ảnh từng ký tự để Flow lọc gợi ý
+            p.pause(page, 0.6, 1.4)
             page.keyboard.type("@")
             page.wait_for_timeout(30)
-            page.keyboard.type(ref, delay=5)  # 5ms/ký tự để kích hoạt sự kiện lọc của ô tìm kiếm
+            p.pause(page, 0.4, 0.9)
+            p.type_slow(page, ref)
 
             opt = page.locator(", ".join(f"{lb.strip()} {option_sel}" for lb in s["ingredient_listbox"].split(","))).filter(
                 has=page.locator("span", has_text=re.compile(r"^\s*" + re.escape(ref) + r"\.(png|jpe?g|webp)\s*$", re.I)))
             try:
-                opt.first.wait_for(state="visible", timeout=3_000)
-                human_click(page, opt.first, delay_before=0.02)
+                opt.first.wait_for(state="visible", timeout=5_000)
+                p.pause(page, 0.4, 0.9)   # nhìn đúng tên ảnh trong danh sách rồi mới bấm
+                human_click(page, opt.first, delay_before=p.click_delay())
                 attached.add(ref)
                 page.wait_for_timeout(30)
+                p.pause(page, 0.4, 1.0)
                 self._caret_to_end(page, box)
             except PlaywrightError:
                 log.warning("Không thấy ảnh %s trong dự án Flow: để lại @%s dạng chữ", ref, ref)
@@ -668,8 +861,9 @@ class FlowBrowserDriver:
         if pos < len(prompt):
             chunk = prompt[pos:]
             page.keyboard.insert_text(chunk)
+        p.pause(page, 0.6, 1.5)
 
-        log.info("Đã điền nhanh prompt (%d ký tự), gắn chip @tag cho %d ảnh", len(prompt), len(attached))
+        log.info("Đã điền prompt (%d ký tự), gắn chip @tag cho %d ảnh", len(prompt), len(attached))
         return attached
 
     @classmethod
@@ -804,11 +998,31 @@ class FlowBrowserDriver:
         last_log = 0.0
         last_turnstile_check = 0.0
         failed_before = Counter(self._error_tiles(page, s))
+        configured = getattr(self, "_tile_retries", None)
+        retries_left = max(0, int(configured if configured is not None else os.environ.get("AFM_FLOW_TILE_RETRIES", "10")))
+        tries = 0
         while time.monotonic() < deadline:
             if should_stop():
                 raise Cancelled("Người dùng hủy job")
+            # Ô lỗi trước (chữ "hoạt động bất thường" nằm ngay trên ô): bấm ↻ thử lại, KHÔNG để bước kiểm tra chữ chung của
+            # trang báo lỗi trước. Hết lượt thử lại mới báo (tài khoản nghỉ theo Cài đặt).
+            new_failed = list((Counter(self._error_tiles(page, s)) - failed_before).elements())
+            if new_failed:
+                low = new_failed[0].lower()
+                hard = any(t.lower() in low for t in (s.get("policy_texts") or []) + (s.get("quota_texts") or []) if not _is_todo(t))
+                if not hard and retries_left > 0 and self._retry_error_tile(page, s, failed_before):
+                    retries_left -= 1
+                    tries += 1
+                    log.info("Thử lại lần %d (còn %d lần)", tries, retries_left)
+                    # ô vừa bấm thử lại: lần sau nó còn hỏng thì là lỗi mới của lượt thử lại; chữ lỗi cũ trên trang không tính nữa
+                    failed_before = Counter(self._error_tiles(page, s))
+                    errors = self._error_counts(page, s)
+                    deadline = max(deadline, time.monotonic() + timeout_s / 2)
+                    continue
+                if tries:
+                    log.warning("Đã bấm ↻ %d lần mà Flow vẫn báo lỗi: dừng tài khoản này", tries)
+                self._raise_for_error_tiles(s, new_failed)
             self._raise_if_error(page, s, errors)
-            self._raise_if_error_tile(page, s, failed_before)
             if time.monotonic() - last_turnstile_check > 5.0:
                 last_turnstile_check = time.monotonic()
                 detect_and_solve_turnstile(page, timeout_s=0.5)
@@ -859,7 +1073,7 @@ class FlowBrowserDriver:
     # Ô Flow tạo HỎNG (đã thấy 2026-11-06 trên ô video: <flow-error-tile>, không có data-media-id / ảnh thu nhỏ nên
     # _media_ids không bao giờ thấy nó): nhãn + chữ trên ô, để so với trước khi bấm Tạo.
     _ERROR_TILES_JS = """(card) => [...document.querySelectorAll(card)].filter(c => c.querySelector('flow-error-tile')
-            || /^\\s*(\\S{0,3}\\s*)?failed\\b/i.test(c.innerText || ''))
+            || /^\\s*(\\S{0,12}\\s*)?(failed\\b|không thành công)/i.test(c.innerText || ''))
         .map(c => ((c.getAttribute('aria-label') || '').trim() + ' | ' + (c.innerText || '').replace(/\\s+/g, ' ').trim()).slice(0, 400))"""
 
     @classmethod
@@ -869,10 +1083,54 @@ class FlowBrowserDriver:
         except PlaywrightError:
             return []
 
+    # Bấm nút ↻ "Thử lại" trên ô lỗi MỚI (ô đầu tiên chưa có trước khi bấm Tạo). Nút không có chữ: tìm theo aria-label / tooltip
+    # (Thử lại, Retry, Tạo lại…), theo tên biểu tượng (refresh, replay, autorenew), không thấy thì lấy nút đầu tiên của ô
+    # (thứ tự trên ô: ↻ thử lại, ↩ dùng lại câu lệnh, 🗑 xóa).
+    _RETRY_TILE_JS = """([card, before]) => {
+        const seen = new Map(); before.forEach(t => seen.set(t, (seen.get(t) || 0) + 1));
+        const tiles = [...document.querySelectorAll(card)].filter(c => c.querySelector('flow-error-tile')
+            || /^\\s*(\\S{0,12}\\s*)?(failed\\b|không thành công)/i.test(c.innerText || ''));
+        for (const c of tiles) {
+            const key = ((c.getAttribute('aria-label') || '').trim() + ' | ' + (c.innerText || '').replace(/\\s+/g, ' ').trim()).slice(0, 400);
+            if (seen.get(key)) { seen.set(key, seen.get(key) - 1); continue; }
+            const btns = [...c.querySelectorAll('button')];
+            const name = b => ((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '') + ' ' + (b.innerText || '')).toLowerCase();
+            const retry = btns.find(b => /thử lại|retry|try again|tạo lại|regenerate|refresh|replay|autorenew|rotate/.test(name(b)))
+                || btns.find(b => !/xóa|xoá|delete|trash|reuse|dùng lại|undo|redo/.test(name(b))) || null;
+            if (!retry) return null;
+            document.querySelectorAll('[data-afm-retry]').forEach(x => x.removeAttribute('data-afm-retry'));
+            retry.setAttribute('data-afm-retry', '1');
+            return key;
+        }
+        return null; }"""
+
+    def _retry_error_tile(self, page, s: dict, before: Counter) -> bool:
+        """Có ô lỗi mới: bấm ↻ thử lại trên chính ô đó (như người thật: nhìn thấy lỗi, chờ một chút rồi bấm). True nếu đã bấm."""
+        try:
+            key = page.evaluate(self._RETRY_TILE_JS, [s["result_card"], list(before.elements())])
+        except PlaywrightError:
+            return False
+        if not key:
+            return False
+        self._pace.pause(page, 2.5, 6.0)
+        btn = page.locator("[data-afm-retry='1']").first
+        try:
+            btn.scroll_into_view_if_needed(timeout=3_000)
+            human_click(page, btn, delay_before=self._pace.click_delay())
+        except PlaywrightError as e:
+            log.warning("Không bấm được nút thử lại trên ô lỗi: %s", str(e)[:200])
+            return False
+        log.info("Ô lỗi trên Flow: đã bấm ↻ thử lại (%s)", key[:160])
+        page.wait_for_timeout(1_500)
+        return True
+
     @classmethod
     def _raise_if_error_tile(cls, page, s: dict, before: Counter):
         """Có ô lỗi MỚI sau khi bấm Tạo: Flow không tạo được cảnh này -> báo ngay thay vì chờ tới hết giờ."""
-        new = list((Counter(cls._error_tiles(page, s)) - before).elements())
+        cls._raise_for_error_tiles(s, list((Counter(cls._error_tiles(page, s)) - before).elements()))
+
+    @classmethod
+    def _raise_for_error_tiles(cls, s: dict, new: list[str]):
         if not new:
             return
         text = new[0]
@@ -1063,7 +1321,11 @@ class FlowBrowserDriver:
             raise TransientError("Không thấy ô prompt trong dự án Flow") from e
 
     # ---------- BACKGROUND: worker tự làm hết ----------
+    _pace = pace_mod.NONE
+
     def generate(self, job: dict, should_stop) -> GenerationResult:
+        self._pace = pace_mod.Pace(pace_mod.factor(job))   # nhịp thao tác như người thật (Cài đặt → Tốc độ thao tác)
+        self._tile_retries = job.get("errorTileRetries")   # Cài đặt → số lần bấm ↻ trên ô lỗi
         s = self._sel(BACKGROUND_KEYS)
         staging = Path(job["stagingDir"])
         staging.mkdir(parents=True, exist_ok=True)
@@ -1087,7 +1349,14 @@ class FlowBrowserDriver:
                     if job.get("editInstruction") and job.get("editSourceUrl"):
                         return self._edit_on_flow(page, s, job, staging, should_stop)
                     with tm.step("cai_dat"):
-                        self._apply_settings(page, s, job["kind"], job)
+                        self._pace.pause(page, 1.5, 4.0)   # như người chuyển sang mục mới: nhìn màn hình một chút rồi mới làm
+                        env_key = (project_url(page.url), job["kind"], job.get("flowModel"), job.get("aspectRatio"),
+                                   job.get("flowThinking"), job.get("videoQuality"), job.get("durationSeconds"))
+                        if env_key not in _ENV_READY:
+                            # lần đầu với dự án / loại này: cài môi trường đầy đủ
+                            self._apply_settings(page, s, job["kind"], job)
+                            _ENV_READY.add(env_key)
+                            self._pace.pause(page, 0.5, 1.2)
                         self._select_mode(page, s, job["kind"])
                     with tm.step("kiem_tra_lan_truoc"):
                         media_id = self._pending_result(page, s, job)
@@ -1105,7 +1374,17 @@ class FlowBrowserDriver:
                             raise TransientError(f"Chỉ gắn được {len(attached & need)}/{len(need)} ảnh @tag vào prompt: không bấm Tạo")
                         if should_stop():
                             raise Cancelled("Người dùng hủy job")
+                        with tm.step("kiem_tra_moi_truong"):
+                            # mỗi lần gửi: nhìn chip trước (model, tỉ lệ, x1). Đúng và môi trường đã kiểm tra trong phiên này
+                            # thì gửi luôn; sai thì mở bảng cài đặt, chọn model trước rồi sửa đúng mục sai (thao tác vừa phải)
+                            self._pace.pause(page, 0.6, 1.4)
+                            if env_key in _ENV_READY and self._chip_ok(page, s, job["kind"], job):
+                                log.info("Môi trường Flow (%s) đúng theo chip: gửi luôn", job["kind"])
+                            else:
+                                self._apply_settings(page, s, job["kind"], job)
+                                _ENV_READY.add(env_key)
                         self._save_pending(page, job, before)
+                        self._pace.pause(page, 1.0, 2.5)   # đọc lại prompt rồi mới bấm Tạo
                         send_prompt(page, s)
                         with tm.step("cho_google"):
                             media_id = self._wait_result(page, s, before, errors, should_stop, job["timeoutSeconds"], job["kind"])

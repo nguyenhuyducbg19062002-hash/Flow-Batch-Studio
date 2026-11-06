@@ -134,7 +134,10 @@ public class JobResultService {
             }
             case SUSPICIOUS -> {
                 // Flow nghi ngờ: KHÔNG cố gửi tiếp trên tài khoản này. Cho nghỉ rồi để tài khoản khác (hoặc chính nó sau giờ nghỉ) làm.
-                int minutes = settings.getIntSetting("suspicious_cooldown_minutes", 30);
+                // nghỉ NGẪU NHIÊN trong khoảng Cài đặt (mặc định 30–45 phút) cho giống người nghỉ tay, không đều nhau
+                int lo = settings.getIntSetting("suspicious_cooldown_min_minutes", settings.getIntSetting("suspicious_cooldown_minutes", 30));
+                int hi = Math.max(lo, settings.getIntSetting("suspicious_cooldown_max_minutes", 45));
+                int minutes = lo + java.util.concurrent.ThreadLocalRandom.current().nextInt(hi - lo + 1);
                 acc.cooldown(LocalDateTime.now().plusMinutes(minutes), r.message());
                 requeue(job, acc.getId(), "Flow nghi ngờ hoạt động bất thường trên " + acc.getEmail() + " → nghỉ " + minutes + " phút, xoay sang tài khoản khác");
             }

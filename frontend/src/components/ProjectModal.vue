@@ -43,9 +43,9 @@
           <FolderInput v-model="form.videoDir" label="Folder Video (sau khi đổi tên)" placeholder="Để trống: tự tìm / tạo"
             hint="Bấm &quot;Đổi tên&quot; thì video được chuyển vào đây, tên = tên cảnh + số (EP06-S1-01.mp4)." />
           <FolderInput v-model="form.imageReviewDir" label="Thư mục ảnh chờ duyệt" placeholder="Để trống: &quot;Ảnh chờ duyệt&quot; cạnh Folder Ảnh"
-            hint="Ảnh tạo xong tải về đây, tên theo số thứ tự (001.png, 002.png…) để nhân viên duyệt." />
+            hint="Ảnh tạo xong tải về đây, tên theo số thứ tự (1.png, 2.png…). Ảnh sai: kéo vào thư mục con &quot;lỗi&quot;." />
           <FolderInput v-model="form.videoReviewDir" label="Thư mục video chờ duyệt" placeholder="Để trống: &quot;Video chờ duyệt&quot; cạnh Folder Video"
-            hint="Video tạo xong tải về đây, tên theo số thứ tự (001.mp4, 002.mp4…)." />
+            hint="Video tạo xong tải về đây, tên theo số thứ tự (1.mp4, 2.mp4…). Video sai: kéo vào thư mục con &quot;lỗi&quot;." />
         </div>
 
         <div>
