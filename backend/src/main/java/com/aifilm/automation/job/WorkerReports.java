@@ -16,4 +16,7 @@ public final class WorkerReports {
     public record FlowProjectReport(String workerId, String url) {}
 
     public record FailureReport(String workerId, String errorCode, String message) {}
+
+    /** Các Chrome có extension Flow Bridge đang nối app: email Google mỗi Chrome; anonymous = có extension chưa rõ email. */
+    public record FlowExtensionsReport(String workerId, java.util.List<String> emails, boolean anonymous) {}
 }

@@ -242,9 +242,34 @@ def run_job(job: dict):
             _report_failed(job, e)
 
 
+_last_ext_report: tuple = ()
+
+
+def report_flow_extensions(bridge) -> None:
+    """Báo backend email của các Chrome có extension đang nối (anonymous = có extension chưa đọc được email, bản cũ)."""
+    global _last_ext_report
+    try:
+        exts = bridge.status().get("extensions") or []
+    except Exception as e:  # noqa: BLE001
+        log.debug("Chưa đọc được danh sách extension: %s", e)
+        return
+    emails = sorted({e["email"] for e in exts if e.get("email")})
+    anonymous = any(not e.get("email") for e in exts)
+    if (emails, anonymous) != _last_ext_report:
+        log.info("Chrome đang nối app: %s%s", ", ".join(emails) or "(chưa có email)",
+                 " + extension chưa rõ email" if anonymous else "")
+    try:
+        call("/flow-extensions", {"workerId": WORKER_ID, "emails": emails, "anonymous": anonymous})
+        _last_ext_report = (emails, anonymous)
+    except requests.RequestException as e:
+        log.debug("Không báo được danh sách Chrome cho backend: %s", e)
+
+
 def keep_flow_bridge():
     """Giữ cầu nối Flow Extension luôn mở để extension trong Chrome kết nối được ngay, kể cả khi chưa có cảnh nào chạy.
-    Worker nào bật trước thì giữ; worker đó tắt thì worker khác bật lại trong vòng 15 giây."""
+    Worker nào bật trước thì giữ; worker đó tắt thì worker khác bật lại trong vòng 10 giây.
+    Worker đang giữ cầu nối báo backend các Chrome (extension) đang nối, mỗi Chrome một email: backend tự thêm / bật / tạm nghỉ
+    tài khoản Flow Extension theo email (mỗi tài khoản Google một hồ sơ Chrome)."""
     def loop():
         try:
             from flow_ext import bridge
@@ -256,7 +281,9 @@ def keep_flow_bridge():
                 bridge.ensure_bridge()
             except Exception as e:  # cổng bị chương trình khác giữ...: thử lại sau
                 log.debug("Cầu nối Flow Extension chưa bật được: %s", e)
-            time.sleep(15)
+            if bridge.owns_bridge():
+                report_flow_extensions(bridge)
+            time.sleep(10)
     threading.Thread(target=loop, name="flow-bridge-keeper", daemon=True).start()
 
 

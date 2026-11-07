@@ -151,3 +151,20 @@ GỬI LIÊN TIẾP NHIỀU PROMPT (tùy chọn)
 - Tab Tài khoản -> sửa tài khoản -> "Số lệnh chạy cùng lúc" = 2 hoặc 3: app gửi liên tiếp 2-3 prompt (cách nhau
   khoảng 8-15 giây), ô nào Flow tạo xong trước thì tải về trước. Đặt 1 = làm từng prompt một như cũ.
 - Gửi dồn làm hết lượt nhanh hơn và dễ bị Google để ý hơn: nên bắt đầu với 2.
+
+NHIỀU TÀI KHOẢN GOOGLE CHẠY CÙNG LÚC (extension 0.4.0)
+------------------------------------------------------
+- Mỗi tài khoản Google dùng MỘT hồ sơ (profile) Chrome riêng: Chrome -> ảnh đại diện góc phải trên -> "Thêm" để tạo
+  hồ sơ mới. Trong MỖI hồ sơ: cài extension như mục 2 (Load unpacked cùng thư mục), mở https://flow.google.com và
+  đăng nhập đúng tài khoản Google của hồ sơ đó.
+- Mở app. Extension mỗi hồ sơ tự nối app và tự báo email (bảng extension hiện dòng "Tài khoản Google: ...").
+  Khoảng 10 giây sau, trang "Tài khoản" của app tự có mỗi email một dòng "Flow (Extension)", trạng thái Sẵn sàng.
+- Bấm Chạy: app tự chia cảnh cho các tài khoản đang rảnh (TK1 cảnh 1, TK2 cảnh 2...), tài khoản nào xong trước nhận
+  cảnh tiếp theo. Mỗi cảnh chạy và tải file trên đúng Chrome của tài khoản được giao.
+- Trang "Cài đặt" -> "Số worker chạy song song" phải >= số hồ sơ Chrome (ví dụ 3 tài khoản thì đặt 3).
+- Đóng một hồ sơ Chrome: tài khoản đó tự tạm nghỉ ("Chrome của tài khoản này chưa mở..."), mở lại thì tự dùng tiếp.
+  Không muốn dùng một tài khoản: bấm "Tắt" ở trang Tài khoản (đừng Xóa, vì Chrome còn mở thì app lại tự thêm).
+- Phim chạy nhiều tài khoản: để TRỐNG ô "Link dự án Flow" (dự án Flow của tài khoản này tài khoản khác không mở được);
+  app tự tạo và nhớ một dự án Flow cho từng tài khoản.
+- Cập nhật từ bản cũ: trong MỖI hồ sơ Chrome, chép thư mục extension mới đè lên rồi bấm nút tải lại (↻) của extension
+  trong chrome://extensions. Tài khoản chung "Chrome (Flow Extension)" tự tạm nghỉ khi đã có tài khoản theo email.

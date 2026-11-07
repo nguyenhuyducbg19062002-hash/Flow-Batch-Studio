@@ -1,4 +1,7 @@
 """FLOW_EXTENSION (điều khiển giao diện tab Flow): nhận file tải về, chờ tab rảnh."""
+import os as _os  # noqa: E402
+for _k, _v in (("AVS_FLOW_WS_PORT", "18421"), ("AVS_FLOW_HTTP_PORT", "18422"), ("AVS_FLOW_CDP_PORT", "18423")):
+    _os.environ.setdefault(_k, _v)   # cổng riêng cho test: không nối vào extension Chrome thật trên máy (18321)
 import sys
 import tempfile
 import time
@@ -59,7 +62,7 @@ class WaitTabTest(unittest.TestCase):
     def test_waits_while_another_scene_uses_the_tab(self):
         answers = iter([{"connected": True, "cdpBusy": True}, {"connected": True, "cdpBusy": True},
                         {"connected": True, "cdpBusy": False}])
-        st = mock.patch.object(ui.bridge, "status", side_effect=lambda: next(answers)).start()
+        st = mock.patch.object(ui.bridge, "status", side_effect=lambda *a: next(answers)).start()
         ui.FlowExtensionUiDriver()._wait_tab(lambda: False)
         self.assertEqual(st.call_count, 3)
 
@@ -67,6 +70,20 @@ class WaitTabTest(unittest.TestCase):
         mock.patch.object(ui.bridge, "status", return_value={"connected": False}).start()
         with mock.patch.object(ui, "EXTENSION_WAIT_S", 0), self.assertRaises(TransientError):
             ui.FlowExtensionUiDriver()._wait_tab(lambda: False)
+
+    def test_asks_status_of_the_jobs_own_chrome(self):
+        st = mock.patch.object(ui.bridge, "status", return_value={"connected": True, "cdpBusy": False}).start()
+        d = ui.FlowExtensionUiDriver()
+        d._use_job({"account": {"email": "B@x.com"}})
+        d._wait_tab(lambda: False)
+        st.assert_called_with("b@x.com")
+
+    def test_missing_chrome_of_account_names_the_email(self):
+        mock.patch.object(ui.bridge, "status", return_value={"connected": False}).start()
+        d = ui.FlowExtensionUiDriver()
+        d._use_job({"account": {"email": "b@x.com"}})
+        with mock.patch.object(ui, "EXTENSION_WAIT_S", 0), self.assertRaisesRegex(TransientError, "b@x.com"):
+            d._wait_tab(lambda: False)
 
     def test_cancel_while_waiting(self):
         mock.patch.object(ui.bridge, "status", return_value={"connected": True, "cdpBusy": True}).start()

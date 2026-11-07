@@ -1,11 +1,13 @@
 package com.aifilm.automation.worker;
 
+import com.aifilm.automation.account.FlowExtensionAccount;
 import com.aifilm.automation.job.JobClaimService;
 import com.aifilm.automation.job.JobPayload;
 import com.aifilm.automation.job.JobResultService;
 import com.aifilm.automation.job.WorkerReports.ClaimMoreRequest;
 import com.aifilm.automation.job.WorkerReports.ClaimRequest;
 import com.aifilm.automation.job.WorkerReports.FailureReport;
+import com.aifilm.automation.job.WorkerReports.FlowExtensionsReport;
 import com.aifilm.automation.job.WorkerReports.FlowProjectReport;
 import com.aifilm.automation.job.WorkerReports.GeneratedReport;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ public class WorkerController {
 
     private final JobClaimService claims;
     private final JobResultService results;
+    private final FlowExtensionAccount flowExtensions;
 
     /** 200 + payload khi có việc; 204 khi chưa có việc. */
     @PostMapping("/claim")
@@ -50,6 +53,12 @@ public class WorkerController {
     @PostMapping("/jobs/{id}/flow-project")
     public void flowProject(@PathVariable long id, @RequestBody FlowProjectReport r) {
         results.onFlowProject(id, r.workerId(), r.url());
+    }
+
+    /** Worker giữ cầu nối Flow Extension báo các Chrome đang nối: tự thêm / bật / tạm nghỉ tài khoản theo email. */
+    @PostMapping("/flow-extensions")
+    public void flowExtensions(@RequestBody FlowExtensionsReport r) {
+        flowExtensions.sync(r.emails(), r.anonymous());
     }
 
     @PostMapping("/jobs/{id}/failed")

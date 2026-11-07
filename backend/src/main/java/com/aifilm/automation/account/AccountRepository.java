@@ -12,6 +12,8 @@ public interface AccountRepository extends JpaRepository<AccountEntity, Long> {
 
     Optional<AccountEntity> findByEmail(String email);
 
+    List<AccountEntity> findByProvider(com.aifilm.automation.project.Provider provider);
+
     boolean existsByProvider(com.aifilm.automation.project.Provider provider);
 
     List<AccountEntity> findByStatus(AccountStatus status);

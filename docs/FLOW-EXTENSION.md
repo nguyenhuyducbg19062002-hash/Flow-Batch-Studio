@@ -13,8 +13,22 @@ worker Python (drivers/flow_extension_ui.py, Playwright connect_over_cdp)
 
 Bridge giả làm một Chrome cho Playwright: tự trả lời vài lệnh cấp trình duyệt, còn lại chuyển cho extension chạy trên tab
 bằng `chrome.debugger` (cách của chế độ extension trong Playwright MCP). Trong lúc app điều khiển, Chrome hiện dải
-"… đã bắt đầu gỡ lỗi trình duyệt này": bình thường, dải tự tắt khi cảnh xong. **Mỗi lúc chỉ chạy một cảnh** (chỉ có
-một tab Flow); cảnh khác chờ tới lượt (tối đa `AVS_FLOW_TAB_BUSY_WAIT_S`, mặc định 1800 giây).
+"… đã bắt đầu gỡ lỗi trình duyệt này": bình thường, dải tự tắt khi cảnh xong. **Mỗi Chrome chạy một cảnh một lúc** (một
+tab Flow); cảnh khác của cùng tài khoản chờ tới lượt (tối đa `AVS_FLOW_TAB_BUSY_WAIT_S`, mặc định 1800 giây).
+
+## Nhiều tài khoản (extension 0.4.0)
+Mỗi tài khoản Google một hồ sơ Chrome, mỗi hồ sơ cài extension và mở flow.google.com đã đăng nhập.
+- Extension tạo `clientId` riêng cho hồ sơ (chrome.storage) và đọc email trên huy hiệu tài khoản của trang Flow
+  (aria-label "Google Account: … (email)"), gửi trong `extension_ready` / `identity`.
+- Bridge giữ mọi extension đang nối (`S.exts`), chọn theo email: CDP `ws://127.0.0.1:18323/acc/<email>`,
+  `/status?ext=`, `/downloads?ext=` (file chỉ thuộc về extension đã tải nó), `ext` trong body `/rpc`, `/progress`.
+  Không có email (tài khoản chung) = extension đầu tiên đang rảnh.
+- Worker đang giữ bridge báo backend `POST /api/worker/flow-extensions {emails, anonymous}` mỗi 10 giây.
+  `FlowExtensionAccount.sync`: tự thêm tài khoản FLOW_EXTENSION theo email (READY), Chrome tắt thì READY -> NEED_LOGIN
+  (kèm lời nhắc), nối lại thì NEED_LOGIN -> READY; không đụng LEASED / DISABLED / COOLDOWN còn hạn. Đã có email thì tài
+  khoản chung "Chrome (Flow Extension)" tạm nghỉ; chỉ còn extension chưa rõ email (bản cũ) thì dùng lại.
+- Hàng đợi chia cảnh như các nền tảng khác (ưu tiên, rồi tài khoản lâu chưa dùng nhất); số cảnh chạy cùng lúc tối đa =
+  "Số worker chạy song song".
 
 ## Cài đặt (một lần)
 1. Chrome → `chrome://extensions` → bật **Developer mode** → **Load unpacked** → chọn thư mục

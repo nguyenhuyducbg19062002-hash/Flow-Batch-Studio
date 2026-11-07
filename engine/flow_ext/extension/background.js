@@ -65,9 +65,11 @@ function connect() {
     saveState({ connected: false });
     return;
   }
-  ws.onopen = () => {
+  ws.onopen = async () => {
     addLog('Đã kết nối app Flow Batch Studio', 'ok', { connected: true, lastError: null });
-    send({ type: 'extension_ready', extensionVersion: chrome.runtime.getManifest().version });
+    const id = await loadIdentity();
+    send({ type: 'extension_ready', extensionVersion: chrome.runtime.getManifest().version, ...id });
+    refreshIdentity();
   };
   ws.onclose = () => {
     ws = null;
@@ -105,7 +107,74 @@ function send(obj) {
 setInterval(() => send({ type: 'ping' }), 20000);
 chrome.alarms.create('reconnect', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((a) => {
-  if (a.name === 'reconnect') { connect(); send({ type: 'ping' }); }
+  if (a.name === 'reconnect') { connect(); send({ type: 'ping' }); refreshIdentity(); }
+});
+
+// ── danh tính: hồ sơ Chrome này (clientId) + email Google đang đăng nhập Flow ─────
+// Mỗi tài khoản Google dùng một hồ sơ Chrome riêng có cài extension. App nhận nhiều extension cùng lúc, tự thêm tài khoản
+// theo email và giao cảnh của tài khoản nào cho đúng Chrome của tài khoản đó.
+let identity = null;
+
+async function loadIdentity() {
+  if (identity) return identity;
+  const { bridgeClientId, bridgeEmail } = await chrome.storage.local.get(['bridgeClientId', 'bridgeEmail']);
+  let clientId = bridgeClientId;
+  if (!clientId) {
+    clientId = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    await chrome.storage.local.set({ bridgeClientId: clientId });
+  }
+  identity = { clientId, email: bridgeEmail || null };
+  if (identity.email && state.email !== identity.email) saveState({ email: identity.email });
+  return identity;
+}
+
+// Email trên huy hiệu tài khoản của trang Flow: aria-label "Google Account: Tên (email)" / "Tài khoản Google: …"
+async function detectEmail() {
+  const tabs = await chrome.tabs.query({ url: FLOW_URLS });
+  for (const t of tabs) {
+    if (t.discarded || t.status !== 'complete') continue;
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: t.id },
+        func: () => {
+          const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+          for (const el of document.querySelectorAll('[aria-label]')) {
+            const a = el.getAttribute('aria-label') || '';
+            if (!/google/i.test(a)) continue;
+            const m = a.match(re);
+            if (m) return m[0].toLowerCase();
+          }
+          return null;
+        },
+      });
+      if (res?.result) return res.result;
+    } catch {}
+  }
+  return null;
+}
+
+let identityBusy = false;
+async function refreshIdentity() {
+  if (identityBusy) return;
+  identityBusy = true;
+  try {
+    const id = await loadIdentity();
+    const email = await detectEmail();   // không có tab Flow / chưa tải xong: giữ email đã biết
+    if (email && email !== id.email) {
+      id.email = email;
+      await chrome.storage.local.set({ bridgeEmail: email });
+      addLog(`Tài khoản Google trên Flow: ${email}`, 'info', { email });
+      send({ type: 'identity', clientId: id.clientId, email });
+    }
+  } finally {
+    identityBusy = false;
+  }
+}
+
+chrome.tabs.onUpdated.addListener((_id, info, tab) => {
+  if (info.status === 'complete' && /^https:\/\/(flow\.google\.com|labs\.google\/fx)\//.test(tab.url || '')) {
+    setTimeout(refreshIdentity, 3000);   // huy hiệu tài khoản hiện sau khi trang vẽ xong
+  }
 });
 chrome.runtime.onStartup.addListener(connect);
 chrome.runtime.onInstalled.addListener(connect);

@@ -8,8 +8,14 @@ Cầu nối giữa worker Python và extension "Flow Batch Studio – Flow Bridg
 
 Cổng CDP là bộ chuyển tiếp: Playwright connect_over_cdp tới đây như tới một Chrome thật; bridge tự trả lời vài lệnh cấp
 trình duyệt (Browser.getVersion, Target.setAutoAttach…) và chuyển các lệnh còn lại cho extension, extension chạy chúng trên
-tab Flow bằng chrome.debugger rồi gửi kết quả / sự kiện ngược lại. Mỗi lúc chỉ một Playwright được nối (chỉ có một tab Flow).
+tab Flow bằng chrome.debugger rồi gửi kết quả / sự kiện ngược lại. Mỗi extension chỉ nhận một Playwright một lúc.
 Cách làm giống chế độ extension của Playwright MCP (microsoft/playwright-mcp, Apache-2.0).
+
+Nhiều hồ sơ Chrome (mỗi hồ sơ một tài khoản Google, mỗi hồ sơ cài extension) nối cùng lúc: mỗi extension tự báo email đang
+đăng nhập Flow, bridge giữ từng kết nối riêng và chuyển lệnh theo email:
+  CDP  ws://127.0.0.1:18323/acc/<email>     điều khiển tab Flow của đúng tài khoản (không có /acc/… = extension nào đang rảnh)
+  HTTP /status?ext=<email>, /downloads?since=…&ext=<email>, body {"ext": email} của /rpc và /progress
+GET /status trả thêm "extensions": danh sách extension đang nối (worker báo backend để tự thêm tài khoản theo email).
 
 Extension cũng báo mỗi file tải xong trong Chrome (chrome.downloads): worker đọc ở GET /downloads?since=<epoch giây> rồi
 chép file từ thư mục Downloads vào staging.
@@ -58,23 +64,63 @@ HOLD_S = float(os.environ.get("AVS_FLOW_HOLD_S", "3600"))
 MAX_MESSAGE = 64 * 1024 * 1024
 
 
+def norm_email(value) -> str:
+    """Email dùng làm khóa chọn extension: chữ thường; không phải email (tài khoản chung "Chrome (Flow Extension)") thì ""."""
+    e = str(value or "").strip().lower()
+    return e if re.fullmatch(r"[^@\s]+@[^@\s]+", e) else ""
+
+
+def ext_key(account: dict | None) -> str:
+    """Khóa extension của một tài khoản app: email của tài khoản; tài khoản chung thì "" (extension nào cũng được)."""
+    return norm_email((account or {}).get("email"))
+
+
+class _Ext:
+    """Một extension đang nối (mỗi hồ sơ Chrome một extension, một tài khoản Google)."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.info: dict = {}
+        self.pending: dict[str, asyncio.Future] = {}
+        self.cdp_client = None                    # Playwright đang điều khiển tab Flow của extension này
+        self.cdp_pending: dict[str, tuple] = {}   # id lệnh gửi extension -> (id lệnh của Playwright, sessionId)
+
+    @property
+    def email(self) -> str:
+        return norm_email(self.info.get("email"))
+
+    def public(self) -> dict:
+        return {"email": self.email or None, "clientId": self.info.get("clientId"),
+                "version": self.info.get("extensionVersion"), "cdpBusy": self.cdp_client is not None}
+
+
 class _State:
     def __init__(self):
         self.loop: asyncio.AbstractEventLoop | None = None
-        self.ws = None
-        self.ext_info: dict = {}
-        self.pending: dict[str, asyncio.Future] = {}
+        self.exts: list[_Ext] = []                # extension đang nối, theo thứ tự nối
         self.gen_lock: asyncio.Lock | None = None
         self.last_gen = 0.0
         self.hold_until = 0.0
         self.hold_reason = ""
-        self.cdp_client = None                    # Playwright đang nối cổng CDP
-        self.cdp_pending: dict[str, tuple] = {}   # id lệnh gửi extension -> (id lệnh của Playwright, sessionId)
-        self.downloads: list[dict] = []           # file Chrome tải xong gần đây (mới nhất ở cuối)
-        self.xfers: dict[str, dict] = {}          # file extension đang gửi thẳng (download_data), chưa đủ gói
+        self.downloads: list[dict] = []           # file Chrome tải xong gần đây (mới nhất ở cuối); "ext" = email extension báo
+        self.xfers: dict[str, dict] = {}          # file extension gửi thẳng (download_data), chưa đủ gói
+
+    @property
+    def ws(self):
+        """WebSocket của extension nối đầu tiên (None = chưa có extension nào)."""
+        return self.exts[0].ws if self.exts else None
 
 
 S = _State()
+
+
+def _pick(key: str | None = None) -> _Ext | None:
+    """Extension cho một tài khoản: đúng email; không chỉ định email thì extension đầu tiên đang rảnh (không thì extension đầu)."""
+    key = norm_email(key)
+    if key:
+        return next((e for e in S.exts if e.email == key), None)
+    free = [e for e in S.exts if e.cdp_client is None]
+    return (free or S.exts or [None])[0]
 
 
 # ── phía extension (WebSocket) ────────────────────────────────────────────────
@@ -84,13 +130,9 @@ async def _ws_handler(ws):
     if origin and not origin.startswith("chrome-extension://"):
         await ws.close(1008, "origin not allowed")
         return
-    if S.ws is not None:
-        try:
-            await S.ws.close(1000, "replaced")
-        except Exception:
-            pass
-    S.ws = ws
-    log.info("Extension đã kết nối")
+    ext = _Ext(ws)
+    S.exts.append(ext)
+    log.info("Extension đã kết nối (%d extension đang nối)", len(S.exts))
     try:
         async for raw in ws:
             try:
@@ -100,25 +142,39 @@ async def _ws_handler(ws):
             t = msg.get("type")
             if t == "ping":
                 await ws.send(json.dumps({"type": "pong"}))
-            elif t == "extension_ready":
-                S.ext_info = {k: v for k, v in msg.items() if k != "type"}
-                log.info("Extension sẵn sàng: %s", S.ext_info)
+            elif t in ("extension_ready", "identity"):
+                info = {k: v for k, v in msg.items() if k != "type"}
+                if t == "identity":   # extension đọc lại email trên tab Flow (đổi tài khoản / vừa mở tab Flow)
+                    info = {**ext.info, **info}
+                changed = t == "extension_ready" or norm_email(info.get("email")) != ext.email
+                ext.info = info
+                cid = info.get("clientId")
+                if cid:   # cùng một extension nối lại (service worker khởi động lại): bỏ kết nối cũ
+                    for old in [o for o in S.exts if o is not ext and o.info.get("clientId") == cid]:
+                        S.exts.remove(old)
+                        try:
+                            await old.ws.close(1000, "replaced")
+                        except Exception:
+                            pass
+                if changed:
+                    log.info("Extension sẵn sàng: %s", ext.info)
             elif t == "cdp_event":
-                await _to_playwright({"method": msg.get("method"), "params": msg.get("params") or {},
-                                      "sessionId": msg.get("sessionId") or CDP_PAGE_SESSION})
+                await _to_playwright(ext, {"method": msg.get("method"), "params": msg.get("params") or {},
+                                           "sessionId": msg.get("sessionId") or CDP_PAGE_SESSION})
             elif t == "cdp_detached":
                 log.info("Extension thôi điều khiển tab Flow: %s", msg.get("reason"))
-                if S.cdp_client is not None:
-                    await S.cdp_client.close(1001, "tab detached")
+                if ext.cdp_client is not None:
+                    await ext.cdp_client.close(1001, "tab detached")
             elif t == "download":
                 d = {k: msg.get(k) for k in ("filename", "url", "mime", "fileSize")}
                 d["at"] = time.time()
+                d["ext"] = ext.email
                 S.downloads = (S.downloads + [d])[-50:]
                 log.info("Chrome tải xong: %s", d.get("filename"))
             elif t == "download_data":
-                _on_download_data(msg)
-            elif msg.get("id") in S.cdp_pending:
-                pw_id, session = S.cdp_pending.pop(msg["id"])
+                _on_download_data(msg, ext.email)
+            elif msg.get("id") in ext.cdp_pending:
+                pw_id, session = ext.cdp_pending.pop(msg["id"])
                 reply = {"id": pw_id}
                 if session:
                     reply["sessionId"] = session
@@ -126,22 +182,21 @@ async def _ws_handler(ws):
                     reply["error"] = {"code": -32000, "message": str(msg["error"])}
                 else:
                     reply["result"] = msg.get("result") or {}
-                await _to_playwright(reply)   # trả lời ngay tại đây: giữ đúng thứ tự với các sự kiện
-            elif msg.get("id") in S.pending:
-                fut = S.pending.pop(msg["id"])
+                await _to_playwright(ext, reply)   # trả lời ngay tại đây: giữ đúng thứ tự với các sự kiện
+            elif msg.get("id") in ext.pending:
+                fut = ext.pending.pop(msg["id"])
                 if not fut.done():
                     fut.set_result(msg)
     finally:
-        if S.ws is ws:
-            S.ws = None
-            S.ext_info = {}
-            log.info("Extension đã ngắt kết nối")
-            for fut in list(S.pending.values()):
-                if not fut.done():
-                    fut.set_result({"error": "EXTENSION_DISCONNECTED"})
-            S.pending.clear()
-            if S.cdp_client is not None:
-                await S.cdp_client.close(1001, "extension disconnected")
+        if ext in S.exts:
+            S.exts.remove(ext)
+        log.info("Extension %s đã ngắt kết nối", ext.email or "(chưa rõ email)")
+        for fut in list(ext.pending.values()):
+            if not fut.done():
+                fut.set_result({"error": "EXTENSION_DISCONNECTED"})
+        ext.pending.clear()
+        if ext.cdp_client is not None:
+            await ext.cdp_client.close(1001, "extension disconnected")
 
 
 # ── file extension gửi thẳng (Chrome bật "Hỏi vị trí lưu": không để Chrome tải, khỏi hộp Save As) ─────────────
@@ -181,7 +236,7 @@ def _unique_path(folder, name: str):
     return target
 
 
-def _on_download_data(msg: dict) -> None:
+def _on_download_data(msg: dict, ext: str = "") -> None:
     """Gom các gói base64 của một file; đủ gói thì ghi ra thư mục Downloads và báo như một lượt Chrome tải xong."""
     xid = str(msg.get("xferId") or "")
     try:
@@ -211,25 +266,25 @@ def _on_download_data(msg: dict) -> None:
         log.warning("Không ghi được file extension gửi thẳng (%s): %s", x["name"], e)
         return
     S.downloads = (S.downloads + [{"filename": str(target), "url": None, "mime": x["mime"], "fileSize": len(data),
-                                   "at": time.time()}])[-50:]
+                                   "at": time.time(), "ext": ext}])[-50:]
     log.info("Extension gửi thẳng file (không qua hộp Lưu của Chrome): %s", target)
 
 
-async def _send(params: dict, timeout: float, method: str = "batch_rpc") -> dict:
-    if S.ws is None:
+async def _send(ext: _Ext | None, params: dict, timeout: float, method: str = "batch_rpc") -> dict:
+    if ext is None or ext not in S.exts:
         return {"error": "NO_EXTENSION"}
     rid = str(uuid.uuid4())
     fut = asyncio.get_running_loop().create_future()
-    S.pending[rid] = fut
+    ext.pending[rid] = fut
     try:
-        await S.ws.send(json.dumps({"id": rid, "method": method, "params": params}))
+        await ext.ws.send(json.dumps({"id": rid, "method": method, "params": params}))
         return await asyncio.wait_for(fut, timeout)
     except asyncio.TimeoutError:
         return {"error": "EXTENSION_TIMEOUT"}
     except Exception as e:  # ws đóng giữa chừng
         return {"error": f"EXTENSION_SEND_FAILED: {e}"}
     finally:
-        S.pending.pop(rid, None)
+        ext.pending.pop(rid, None)
 
 
 async def _rpc(body: dict) -> dict:
@@ -237,8 +292,9 @@ async def _rpc(body: dict) -> dict:
     timeout = float(body.get("timeout") or 120)
     if not params.get("rpcid") or not params.get("freq"):
         return {"error": "INVALID_RPC"}
+    ext = _pick(body.get("ext"))
     if not params.get("captchaAction"):
-        return await _send(params, timeout)
+        return await _send(ext, params, timeout)
 
     # lệnh tạo: lần lượt, giãn nhịp, tôn trọng thời gian nghỉ khi Flow nghi ngờ
     async with S.gen_lock:
@@ -248,7 +304,7 @@ async def _rpc(body: dict) -> dict:
         wait = S.last_gen + MIN_GAP_S - now
         if wait > 0:
             await asyncio.sleep(wait)
-        out = await _send(params, timeout)
+        out = await _send(ext, params, timeout)
         S.last_gen = time.time()
         text = f"{out.get('error') or ''} {out.get('data') or ''}"[:200000]
         if "PUBLIC_ERROR_UNUSUAL_ACTIVITY" in text:
@@ -258,16 +314,20 @@ async def _rpc(body: dict) -> dict:
         return out
 
 
-def _status() -> dict:
+def _status(key: str | None = None) -> dict:
+    """Trạng thái extension của một tài khoản (key = email; không có = extension nào đang rảnh) + danh sách mọi extension."""
     now = time.time()
-    return {"connected": S.ws is not None, "extension": S.ext_info, "cdpBusy": S.cdp_client is not None,
+    ext = _pick(key)
+    return {"connected": ext is not None, "extension": dict(ext.info) if ext else {},
+            "cdpBusy": bool(ext and ext.cdp_client is not None),
+            "extensions": [e.public() for e in S.exts],
             "holdSeconds": max(0, int(S.hold_until - now)), "holdReason": S.hold_reason if now < S.hold_until else ""}
 
 
 # ── phía Playwright (CDP qua extension) ──────────────────────────────────────
 
-async def _to_playwright(obj: dict):
-    c = S.cdp_client
+async def _to_playwright(ext: _Ext, obj: dict):
+    c = ext.cdp_client
     if c is None:
         return
     try:
@@ -291,15 +351,19 @@ async def _cdp_handler(client):
     if origin:   # chỉ chương trình trên máy (Playwright) được nối, trang web thì không
         await client.close(1008, "origin not allowed")
         return
-    if S.cdp_client is not None:
-        await client.close(1013, "busy")
-        return
-    if S.ws is None:
+    from urllib.parse import unquote, urlparse
+    raw_path = getattr(getattr(client, "request", None), "path", None) or getattr(client, "path", None) or "/"
+    path = urlparse(raw_path).path.strip("/")
+    ext = _pick(unquote(path[4:]) if path.startswith("acc/") else "")
+    if ext is None:
         await client.close(1011, "NO_EXTENSION")
         return
-    S.cdp_client = client
+    if ext.cdp_client is not None:
+        await client.close(1013, "busy")
+        return
+    ext.cdp_client = client
     target_info: dict = {}
-    log.info("Playwright nối vào tab Flow qua extension")
+    log.info("Playwright nối vào tab Flow qua extension %s", ext.email or "(chưa rõ email)")
     try:
         async for raw in client:
             try:
@@ -312,68 +376,71 @@ async def _cdp_handler(client):
             if session:
                 reply["sessionId"] = session
             if not session and method == "Target.setAutoAttach":
-                out = await _send({}, 30, method="cdp_attach")
+                out = await _send(ext, {}, 30, method="cdp_attach")
                 if out.get("error"):
                     reply["error"] = {"code": -32000, "message": f"Không điều khiển được tab Flow: {out['error']}"}
-                    await _to_playwright(reply)
+                    await _to_playwright(ext, reply)
                     continue
                 target_info = dict((out.get("result") or {}).get("targetInfo") or {}, attached=True)
-                await _to_playwright({"method": "Target.attachedToTarget",
+                await _to_playwright(ext, {"method": "Target.attachedToTarget",
                                       "params": {"sessionId": CDP_PAGE_SESSION, "targetInfo": target_info,
                                                  "waitingForDebugger": False}})
                 reply["result"] = {}
-                await _to_playwright(reply)
+                await _to_playwright(ext, reply)
                 continue
             if method == "Target.getTargetInfo" and (not session or session == CDP_PAGE_SESSION) and target_info:
                 reply["result"] = {"targetInfo": target_info}
-                await _to_playwright(reply)
+                await _to_playwright(ext, reply)
                 continue
             local = None if session else _browser_reply(method)
             if local is not None:
                 reply["result"] = local
-                await _to_playwright(reply)
+                await _to_playwright(ext, reply)
                 continue
-            if S.ws is None:
+            if ext not in S.exts:
                 reply["error"] = {"code": -32000, "message": "NO_EXTENSION"}
-                await _to_playwright(reply)
+                await _to_playwright(ext, reply)
                 continue
             rid = str(uuid.uuid4())
-            S.cdp_pending[rid] = (pw_id, session)
+            ext.cdp_pending[rid] = (pw_id, session)
             child = session if session and session != CDP_PAGE_SESSION else None
             try:
-                await S.ws.send(json.dumps({"id": rid, "method": "cdp",
-                                            "params": {"method": method, "params": params, "sessionId": child}}))
+                await ext.ws.send(json.dumps({"id": rid, "method": "cdp",
+                                              "params": {"method": method, "params": params, "sessionId": child}}))
             except Exception as e:
-                S.cdp_pending.pop(rid, None)
+                ext.cdp_pending.pop(rid, None)
                 reply["error"] = {"code": -32000, "message": f"EXTENSION_SEND_FAILED: {e}"}
-                await _to_playwright(reply)
+                await _to_playwright(ext, reply)
     except Exception as e:   # Playwright rớt giữa chừng
         log.debug("Kết nối CDP đóng: %s", e)
     finally:
-        S.cdp_client = None
-        S.cdp_pending.clear()
+        ext.cdp_client = None
+        ext.cdp_pending.clear()
         log.info("Playwright rời tab Flow")
-        if S.ws is not None:
+        if ext in S.exts:
             try:
-                await _send({}, 10, method="cdp_detach")
+                await _send(ext, {}, 10, method="cdp_detach")
             except Exception:
                 pass
 
 
 async def _progress(body: dict):
     """Tiến độ cảnh đang chạy -> bảng quản lý của extension (không chờ trả lời)."""
-    if S.ws is None:
+    ext = _pick(body.get("ext"))
+    if ext is None:
         return
     msg = {k: body.get(k) for k in ("event", "jobId", "label", "kind", "mode", "text")}
     msg["type"] = "job"
     try:
-        await S.ws.send(json.dumps(msg, ensure_ascii=False))
+        await ext.ws.send(json.dumps(msg, ensure_ascii=False))
     except Exception:
         pass
 
 
-def _downloads_since(since: float) -> list[dict]:
-    return [d for d in S.downloads if d["at"] >= since]
+def _downloads_since(since: float, key: str | None = None) -> list[dict]:
+    """File tải xong từ thời điểm since; có email thì chỉ file do extension của email đó báo (không lấy nhầm file tài khoản khác)."""
+    key = norm_email(key)
+    return [d for d in S.downloads if d["at"] >= since and (not key or d.get("ext") == key)]
 
 
 # ── phía worker (HTTP) ────────────────────────────────────────────────────────
@@ -399,15 +466,18 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._authorized():
             return
-        if self.path == "/status":
-            self._reply(200, asyncio.run_coroutine_threadsafe(_async(_status), S.loop).result(5))
-        elif self.path.startswith("/downloads"):
-            from urllib.parse import parse_qs, urlparse
+        from urllib.parse import parse_qs, urlparse
+        url = urlparse(self.path)
+        q = parse_qs(url.query)
+        key = (q.get("ext") or [""])[0]
+        if url.path == "/status":
+            self._reply(200, asyncio.run_coroutine_threadsafe(_async(lambda: _status(key)), S.loop).result(5))
+        elif url.path == "/downloads":
             try:
-                since = float((parse_qs(urlparse(self.path).query).get("since") or ["0"])[0])
+                since = float((q.get("since") or ["0"])[0])
             except ValueError:
                 since = 0.0
-            self._reply(200, {"downloads": _downloads_since(since)})
+            self._reply(200, {"downloads": _downloads_since(since, key)})
         else:
             self._reply(404, {"error": "not found"})
 
@@ -521,16 +591,32 @@ def ensure_bridge() -> None:
         _started = True
 
 
-def status() -> dict:
+def owns_bridge() -> bool:
+    """Bridge đang chạy trong tiến trình này (worker này giữ cầu nối)."""
+    return _started
+
+
+def status(ext: str | None = None) -> dict:
+    """Trạng thái extension của tài khoản ext (email; None = extension nào đang rảnh), kèm "extensions" = mọi extension."""
     ensure_bridge()
-    return requests.get(f"{BRIDGE_URL}/status", headers={AUTH_HEADER: "1"}, timeout=5).json()
+    key = norm_email(ext)
+    return requests.get(f"{BRIDGE_URL}/status", params={"ext": key} if key else None, headers={AUTH_HEADER: "1"},
+                        timeout=5).json()
+
+
+def cdp_url(ext: str | None = None) -> str:
+    """Cổng CDP điều khiển tab Flow của đúng tài khoản (email); không có email = extension nào đang rảnh."""
+    from urllib.parse import quote
+    key = norm_email(ext)
+    return f"{CDP_URL}/acc/{quote(key, safe='')}" if key else CDP_URL
 
 
 def rpc(rpcid: str, freq: str, captcha_action: str | None = None, match: str | None = None,
-        timeout: float = 120) -> dict:
+        timeout: float = 120, ext: str | None = None) -> dict:
     """Gửi một lệnh batchexecute cho extension. Trả {status, data} hoặc {error}."""
     ensure_bridge()
-    body = {"rpcid": rpcid, "freq": freq, "captchaAction": captcha_action, "match": match, "timeout": timeout}
+    body = {"rpcid": rpcid, "freq": freq, "captchaAction": captcha_action, "match": match, "timeout": timeout,
+            "ext": norm_email(ext)}
     r = requests.post(f"{BRIDGE_URL}/rpc", json=body, headers={AUTH_HEADER: "1"}, timeout=timeout + 960)
     r.raise_for_status()
     return r.json()
@@ -541,17 +627,22 @@ def progress(event: str, job: dict | None = None, text: str = "") -> None:
     job = job or {}
     kind = job.get("kind")
     label = f"{'Video' if kind == 'VIDEO' else 'Ảnh'} {job.get('externalId') or ''}".strip() if job else ""
-    body = {"event": event, "jobId": job.get("jobId"), "label": label, "kind": kind, "mode": job.get("runMode"), "text": text}
+    body = {"event": event, "jobId": job.get("jobId"), "label": label, "kind": kind, "mode": job.get("runMode"), "text": text,
+            "ext": ext_key(job.get("account"))}
     try:
         requests.post(f"{BRIDGE_URL}/progress", json=body, headers={AUTH_HEADER: "1"}, timeout=3)
     except Exception:
         pass
 
 
-def downloads(since: float) -> list[dict]:
-    """Các file Chrome tải xong từ thời điểm since (epoch giây): [{filename, url, mime, fileSize, at}]."""
+def downloads(since: float, ext: str | None = None) -> list[dict]:
+    """Các file Chrome tải xong từ thời điểm since (epoch giây): [{filename, url, mime, fileSize, at, ext}].
+    ext = email: chỉ file do extension của tài khoản đó báo."""
     ensure_bridge()
-    r = requests.get(f"{BRIDGE_URL}/downloads", params={"since": since}, headers={AUTH_HEADER: "1"}, timeout=10)
+    params = {"since": since}
+    if norm_email(ext):
+        params["ext"] = norm_email(ext)
+    r = requests.get(f"{BRIDGE_URL}/downloads", params=params, headers={AUTH_HEADER: "1"}, timeout=10)
     r.raise_for_status()
     return r.json().get("downloads") or []
 

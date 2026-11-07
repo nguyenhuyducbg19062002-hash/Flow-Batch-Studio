@@ -1,4 +1,7 @@
 """Extension gửi thẳng file (download_data) khi Chrome bật "Hỏi vị trí lưu": bridge ghép gói, ghi file, báo như lượt tải."""
+import os as _os  # noqa: E402
+for _k, _v in (("AVS_FLOW_WS_PORT", "18421"), ("AVS_FLOW_HTTP_PORT", "18422"), ("AVS_FLOW_CDP_PORT", "18423")):
+    _os.environ.setdefault(_k, _v)   # cổng riêng cho test: không nối vào extension Chrome thật trên máy (18321)
 import base64
 import os
 import tempfile

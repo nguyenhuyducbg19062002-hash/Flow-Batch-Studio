@@ -27,6 +27,7 @@ function render() {
   const s = current || {};
   $('ver').textContent = `Phiên bản ${chrome.runtime.getManifest().version}`;
   pill('app', s.connected ? 'ok' : 'err', s.connected ? 'Đã kết nối' : 'Chưa kết nối');
+  pill('acc', s.email ? 'ok' : 'warn', s.email || 'Chưa đọc được: mở tab Flow đã đăng nhập');
 
   const project = flowTabs.find((t) => t.url && t.url.includes('/project/'));
   if (!flowTabs.length) pill('tab', 'err', 'Chưa mở');
