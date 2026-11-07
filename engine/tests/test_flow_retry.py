@@ -13,6 +13,7 @@ from drivers import flow_browser as fb  # noqa: E402
 S = {"result_card": "flow-grid-tile-container", "agent_reply_marker": "TODO", "policy_texts": ["vi phạm chính sách"],
      "quota_texts": ["hết tín dụng"], "suspicious_texts": ["hoạt động bất thường"]}
 BOT = " | warning Không thành công Chúng tôi nhận thấy có hoạt động bất thường"
+FAIL = " | warning Không thành công Đã xảy ra lỗi"
 
 
 def driver(tiles_seq, media_seq):
@@ -41,12 +42,19 @@ class RetryTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_bot_error_tile_is_retried_then_result_returned(self):
-        # trước khi bấm Tạo: không có ô lỗi; sau đó ô lỗi → bấm ↻; lượt sau có ảnh mới
-        d = driver([[], [BOT], [BOT], [BOT]], [[], [], ["new-1"], ["new-1"]])
+    def test_plain_error_tile_is_retried_then_result_returned(self):
+        # trước khi bấm Tạo: không có ô lỗi; sau đó ô lỗi thường → bấm ↻; lượt sau có ảnh mới
+        d = driver([[], [FAIL], [FAIL], [FAIL]], [[], [], ["new-1"], ["new-1"]])
         got = d._wait_result(self.page, S, set(), {}, lambda: False, 60, "IMAGE")
         self.assertEqual(got, "new-1")
         d._retry_error_tile.assert_called_once()
+
+    def test_unusual_activity_stops_at_once_without_retry(self):
+        # Google đang chặn tạm tài khoản: bấm ↻ chỉ bị chặn lâu hơn -> báo ngay để tài khoản nghỉ, cảnh sang tài khoản khác
+        d = driver([[], [BOT]], [[]] * 10)
+        with self.assertRaises(fb.BotSuspected):
+            d._wait_result(self.page, S, set(), {}, lambda: False, 60, "IMAGE")
+        d._retry_error_tile.assert_not_called()
 
     def test_policy_error_is_not_retried(self):
         d = driver([[], [" | Không thành công vi phạm chính sách"]], [[]])
@@ -56,8 +64,8 @@ class RetryTests(unittest.TestCase):
 
     def test_gives_up_after_retries(self):
         with mock.patch.dict("os.environ", {"AFM_FLOW_TILE_RETRIES": "1"}):
-            d = driver([[], [BOT], [BOT], [BOT, BOT + " 2"]], [[]] * 10)
-            with self.assertRaises(fb.BotSuspected):
+            d = driver([[], [FAIL], [FAIL], [FAIL, FAIL + " 2"]], [[]] * 10)
+            with self.assertRaises(fb.TransientError):
                 d._wait_result(self.page, S, set(), {}, lambda: False, 60, "IMAGE")
         d._retry_error_tile.assert_called_once()
 

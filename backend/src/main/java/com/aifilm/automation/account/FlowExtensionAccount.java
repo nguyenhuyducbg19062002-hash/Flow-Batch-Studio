@@ -34,6 +34,12 @@ public class FlowExtensionAccount {
     static final String SHARED_PAUSED = "Tạm nghỉ: đã có tài khoản theo email của từng Chrome";
 
     private final Set<String> warned = new HashSet<>();
+    /**
+     * Khóa RIÊNG cho sync. Không dùng khóa của đối tượng (synchronized): ensure() được gọi BÊN TRONG transaction nhận việc
+     * (đang giữ kết nối SQLite duy nhất), còn sync cần kết nối đó. Dùng chung một khóa = sync giữ khóa chờ kết nối, nhận việc
+     * giữ kết nối chờ khóa: kẹt cả app (đã gặp 07/11/2026: giao diện trống, worker 0, bật lại vẫn kẹt).
+     */
+    private final Object syncLock = new Object();
 
     private final AccountRepository accounts;
 
@@ -79,7 +85,13 @@ public class FlowExtensionAccount {
      * @param emails    email Google của từng Chrome có extension đang nối
      * @param anonymous có extension chưa đọc được email (bản cũ / chưa mở tab Flow): tài khoản chung vẫn dùng được
      */
-    public synchronized void sync(List<String> emails, boolean anonymous) {
+    public void sync(List<String> emails, boolean anonymous) {
+        synchronized (syncLock) {
+            syncLocked(emails, anonymous);
+        }
+    }
+
+    private void syncLocked(List<String> emails, boolean anonymous) {
         Set<String> online = new LinkedHashSet<>();
         if (emails != null) {
             for (String e : emails) {
@@ -108,7 +120,9 @@ public class FlowExtensionAccount {
                     if (warned.add(email)) {
                         log.warn("Flow Extension: {} đã có ở dạng tài khoản {}, không tự thêm bản Flow Extension", email, a.getProvider());
                     }
-                } else if (a.getStatus() == AccountStatus.NEED_LOGIN) {
+                } else if (a.getStatus() == AccountStatus.NEED_LOGIN && OFFLINE.equals(a.getLastErrorMessage())) {
+                    // chỉ bật lại tài khoản tạm nghỉ VÌ Chrome tắt. Cần đăng nhập vì lý do khác (phiên hỏng, Google chặn…) thì
+                    // để người dùng xử lý, không tự bật lại mỗi 10 giây rồi lại hỏng
                     a.setStatus(AccountStatus.READY);
                     a.setLastErrorMessage(null);
                     a.setUpdatedAt(now);
@@ -134,8 +148,10 @@ public class FlowExtensionAccount {
                         a.setStatus(AccountStatus.NEED_LOGIN);
                         a.setLastErrorMessage(SHARED_PAUSED);
                     } else if (use && st == AccountStatus.NEED_LOGIN && SHARED_PAUSED.equals(a.getLastErrorMessage())) {
-                        a.setStatus(AccountStatus.READY);
-                        a.setLastErrorMessage(null);
+                        // đang nghỉ dở (Flow báo bất thường / hết lượt) trước khi tạm dừng: nghỉ nốt, không dùng lại ngay
+                        boolean resting = a.getCooldownUntil() != null && a.getCooldownUntil().isAfter(now);
+                        a.setStatus(resting ? AccountStatus.COOLDOWN : AccountStatus.READY);
+                        a.setLastErrorMessage(resting ? "Đang nghỉ tới " + a.getCooldownUntil().withNano(0) : null);
                     } else {
                         continue;
                     }

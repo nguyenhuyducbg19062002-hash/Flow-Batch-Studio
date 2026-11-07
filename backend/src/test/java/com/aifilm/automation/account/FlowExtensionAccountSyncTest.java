@@ -119,6 +119,55 @@ class FlowExtensionAccountSyncTest {
         assertEquals(AccountStatus.NEED_LOGIN, shared.getStatus());
     }
 
+    /** ensure() (synchronized) chạy trong transaction nhận việc: sync không được chờ cùng khóa đó, nếu không thì kẹt cả app. */
+    @Test
+    void syncDoesNotWaitForTheLockEnsureHolds() throws Exception {
+        java.util.concurrent.CountDownLatch held = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Thread claim = new Thread(() -> {
+            synchronized (sync) {   // giống ensure() đang chạy giữa transaction
+                held.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        });
+        claim.start();
+        held.await();
+        try {
+            java.util.concurrent.CompletableFuture<Void> done =
+                    java.util.concurrent.CompletableFuture.runAsync(() -> sync.sync(List.of("a@gmail.com"), false));
+            done.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            claim.join();
+        }
+        assertEquals(AccountStatus.READY, get("a@gmail.com").getStatus());
+    }
+
+    @Test
+    void needLoginForOtherReasonsIsNotRevivedEveryTenSeconds() {
+        AccountEntity a = account("a@gmail.com", Provider.FLOW_EXTENSION, AccountStatus.NEED_LOGIN);
+        a.setLastErrorMessage("Phiên đăng nhập hỏng");
+        db.add(a);
+        sync.sync(List.of("a@gmail.com"), false);
+        assertEquals(AccountStatus.NEED_LOGIN, a.getStatus());
+    }
+
+    @Test
+    void sharedAccountKeepsItsRestWhenUnpaused() {
+        AccountEntity shared = get(FlowExtensionAccount.EMAIL);
+        shared.setStatus(AccountStatus.COOLDOWN);
+        shared.setCooldownUntil(LocalDateTime.now().plusMinutes(30));
+        sync.sync(List.of("a@gmail.com"), false);
+        assertEquals(AccountStatus.NEED_LOGIN, shared.getStatus());
+
+        sync.sync(List.of(), true);   // chỉ còn extension chưa rõ email: dùng lại tài khoản chung, nhưng nghỉ nốt
+        assertEquals(AccountStatus.COOLDOWN, shared.getStatus());
+    }
+
     @Test
     void doesNotTouchSameEmailOfOtherProvider() {
         db.add(account("c@gmail.com", Provider.FLOW_BROWSER, AccountStatus.READY));

@@ -91,5 +91,24 @@ class WaitTabTest(unittest.TestCase):
             ui.FlowExtensionUiDriver()._wait_tab(lambda: True)
 
 
+class WideViewportTest(unittest.TestCase):
+    """Cửa sổ Chrome hẹp: Flow ẩn nút Upload / menu ô. Chạy ngầm thì giả lập màn hình rộng."""
+
+    def page(self, w, h):
+        p = mock.Mock()
+        p.evaluate.return_value = [w, h]
+        return p
+
+    def test_narrow_window_gets_wide_viewport(self):
+        p = self.page(940, 860)
+        ui.FlowExtensionUiDriver()._wide_viewport(p)
+        p.set_viewport_size.assert_called_once_with({"width": 1600, "height": 900})
+
+    def test_wide_window_is_left_alone(self):
+        p = self.page(1880, 950)
+        ui.FlowExtensionUiDriver()._wide_viewport(p)
+        p.set_viewport_size.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1039,12 +1039,15 @@ class FlowBrowserDriver:
                     self._log_tiles(page, s, before)
                     raise TransientError(f"Flow không nhận lệnh Tạo: {NO_START_S}s sau khi bấm Tạo vẫn không có ô mới "
                                          "trong lưới (Tác nhân hỏi lại / hộp thoại che / mạng chậm?). Sẽ thử lại")
-            # Ô lỗi trước (chữ "hoạt động bất thường" nằm ngay trên ô): bấm ↻ thử lại, KHÔNG để bước kiểm tra chữ chung của
-            # trang báo lỗi trước. Hết lượt thử lại mới báo (tài khoản nghỉ theo Cài đặt).
+            # Ô lỗi trước, KHÔNG để bước kiểm tra chữ chung của trang báo lỗi trước. Ô "Failed" thường: bấm ↻ thử lại, hết lượt
+            # mới báo. Ô "hoạt động bất thường": báo ngay (tài khoản nghỉ theo Cài đặt, cảnh chuyển sang tài khoản khác).
             new_failed = list((Counter(self._error_tiles(page, s)) - failed_before).elements())
             if new_failed:
                 low = new_failed[0].lower()
-                hard = any(t.lower() in low for t in (s.get("policy_texts") or []) + (s.get("quota_texts") or []) if not _is_todo(t))
+                # vi phạm / hết lượt / "hoạt động bất thường": bấm ↻ cũng không qua. "Bất thường" = Google đang chặn tạm tài khoản,
+                # bấm thêm chỉ làm bị chặn lâu hơn (đã gặp 07/11/2026: bấm ↻ 5 lần đều hỏng) -> báo ngay để tài khoản nghỉ
+                hard = any(t.lower() in low for t in (s.get("policy_texts") or []) + (s.get("quota_texts") or [])
+                           + (s.get("suspicious_texts") or []) if not _is_todo(t))
                 if not hard and retries_left > 0 and self._retry_error_tile(page, s, failed_before):
                     retries_left -= 1
                     tries += 1

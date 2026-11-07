@@ -154,7 +154,31 @@ class FlowExtensionUiDriver(FlowBrowserDriver):
                 raise TransientError(f"Không mở được trang Flow: {str(e)[:300]}") from e
         if "accounts.google.com" in page.url:
             raise TransientError("Tab Flow chưa đăng nhập Google: đăng nhập trong Chrome rồi chạy lại")
+        if job.get("runMode") != "FOREGROUND":   # Mở Flow: người dùng thao tác, giữ nguyên cửa sổ của họ
+            self._wide_viewport(page)
         return page
+
+    # Cửa sổ Chrome hẹp (vd. hai hồ sơ xếp cạnh nhau, mỗi cửa sổ nửa màn hình): Flow đổi sang bố cục thu gọn, nút "Tải nội dung
+    # nghe nhìn lên" / menu ⋮ của ô bị ẩn, app chờ 45s rồi báo lỗi (đã gặp 07/11/2026). Chạy ngầm: cho tab Flow vẽ như màn hình
+    # rộng trong lúc app điều khiển (Emulation.setDeviceMetricsOverride); app trả tab (gỡ chrome.debugger) thì Chrome tự bỏ.
+    VIEWPORT_MIN_W = int(os.environ.get("AVS_FLOW_VIEWPORT_MIN_W", "1280"))
+    VIEWPORT_W = int(os.environ.get("AVS_FLOW_VIEWPORT_W", "1600"))
+    VIEWPORT_H = int(os.environ.get("AVS_FLOW_VIEWPORT_H", "900"))
+
+    def _wide_viewport(self, page) -> None:
+        try:
+            w, h = page.evaluate("() => [window.innerWidth, window.innerHeight]")
+        except (PlaywrightError, TypeError, ValueError):
+            return
+        if w >= self.VIEWPORT_MIN_W and h >= 600:
+            return
+        size = {"width": max(w, self.VIEWPORT_W), "height": max(h, self.VIEWPORT_H)}
+        try:
+            page.set_viewport_size(size)
+            log.info("Cửa sổ Chrome hẹp (%sx%s): cho tab Flow hiển thị %sx%s trong lúc app điều khiển", w, h,
+                     size["width"], size["height"])
+        except PlaywrightError as e:
+            log.warning("Không đặt được kích thước hiển thị cho tab Flow: %s", str(e)[:200])
 
     # ── tải file: Chrome tải vào thư mục Downloads, extension báo đường dẫn ──
 
