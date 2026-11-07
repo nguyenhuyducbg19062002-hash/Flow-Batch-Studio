@@ -43,6 +43,8 @@ DEFAULT_VIDEO_QUALITY = "720p"   # phim không đặt chất lượng thì dùng
 # Bấm Tạo xong mà quá ngần này giây chưa có ô mới nào trong lưới (Tác nhân trả lời thì tính lại từ lúc đó) = Flow không nhận lệnh:
 # báo lỗi để cảnh thử lại, không đứng chờ hết thời gian chờ của cảnh. Tác nhân đã thấy mất ~85s mới trả lời (2026-11-06).
 NO_START_S = int(os.environ.get("AVS_FLOW_NO_START_S", "120"))
+# Ảnh kết quả mới hiện trong khung chat của Tác nhân mà sau ngần này giây lưới vẫn không có ô mới: bấm vào ảnh đó để tải
+CHAT_RESULT_WAIT_S = float(os.environ.get("AVS_FLOW_CHAT_RESULT_WAIT_S", "5"))
 log = logging.getLogger("flow")
 
 # Khóa bắt buộc phải cấu hình cho chế độ BACKGROUND (FOREGROUND chỉ cố gắng, thiếu thì người dùng tự làm tay)
@@ -953,24 +955,27 @@ class FlowBrowserDriver:
     """
 
     @staticmethod
-    def _media_ids(page, s: dict, kind: str | None = None) -> list[str]:
+    def _media_ids(page, s: dict, kind: str | None = None, uploaded: bool = False) -> list[str]:
         """
         Các ô KẾT QUẢ do Flow tạo trong lưới của dự án (khoá của từng ô). Bỏ qua ô ảnh người dùng tải lên
         (tên ô là tên file, ví dụ "CHAR-CALEB-1.png"). kind = "VIDEO": chỉ ô video; "IMAGE": chỉ ô ảnh.
+        uploaded=True: lấy cả ô có tên là tên file. Tác nhân của Flow có lúc đặt tên ẢNH KẾT QUẢ theo ảnh tham chiếu
+        (2026-11-07: kết quả của CHAR-ETHAN-3 mang tên "CHAR-ETHAN-1.jpg"), nên khi đã biết mọi ô có trước lúc bấm Tạo thì
+        phải so theo khoá, không lọc theo tên.
         """
-        return page.evaluate("""([card, kind]) => {""" + FlowBrowserDriver._TILE_KEYS_JS + """
+        return page.evaluate("""([card, kind, uploaded]) => {""" + FlowBrowserDriver._TILE_KEYS_JS + """
             return [...document.querySelectorAll(card)].filter(c => {
                 const label = (c.getAttribute('aria-label') || '').trim();
-                if (/[.](png|jpe?g|webp|gif|bmp|mp4|mov|webm)$/i.test(label)) return false;   // ảnh / file tải lên
+                if (!uploaded && /[.](png|jpe?g|webp|gif|bmp|mp4|mov|webm)$/i.test(label)) return false;   // ảnh / file tải lên
                 const isVideo = !!c.querySelector('video, flow-video-tile');
                 return kind === 'VIDEO' ? isVideo : kind === 'IMAGE' ? !isVideo : true;
             }).map(c => { const k = keyOf(c); if (k) c.setAttribute('data-afm-key', k); return k; }).filter(Boolean); }""",
-                             [s["result_card"], kind])
+                             [s["result_card"], kind, uploaded])
 
     @staticmethod
     def _card(page, s: dict, key: str):
-        """Ô kết quả theo khoá (gắn lại khoá trước khi tìm: lưới của Flow vẽ lại liên tục)."""
-        FlowBrowserDriver._media_ids(page, s)
+        """Ô kết quả theo khoá (gắn lại khoá trước khi tìm: lưới của Flow vẽ lại liên tục). Gắn cả ô mang tên file."""
+        FlowBrowserDriver._media_ids(page, s, uploaded=True)
         return page.locator(f"{s['result_card']}[data-afm-key={json.dumps(key)}]").first
 
     @staticmethod
@@ -1016,19 +1021,21 @@ class FlowBrowserDriver:
         # thử lại, thay vì đứng chờ tới hết timeout_s (mặc định 15 phút) như đã gặp 2026-11-07 (CHAR-CLARA-3: bấm Tạo, ô prompt
         # trống, không có ô mới nào). Ảnh chụp lưới trước khi bấm Tạo do generate() đặt; không có thì bỏ qua kiểm tra này.
         probe, self._sent_probe = getattr(self, "_sent_probe", None), None
-        started = probe is None
+        accepted = probe is None
         no_start_deadline = time.monotonic() + NO_START_S
+        chat_tried: set[str] = set()
+        chat_seen: dict[str, float] = {}
         while time.monotonic() < deadline:
             if should_stop():
                 raise Cancelled("Người dùng hủy job")
-            if not started:
-                started = self._flow_started(page, s, probe)
-                if not started and has_reply_sel:
+            if not accepted:
+                accepted = self._flow_started(page, s, probe)
+                if not accepted and has_reply_sel:
                     n = page.locator(reply_sel).count()
                     if n != probe.setdefault("replies", replies):   # Tác nhân vừa trả lời: nó còn đang làm, chờ thêm
                         probe["replies"] = n
                         no_start_deadline = time.monotonic() + NO_START_S
-                if not started and time.monotonic() > no_start_deadline:
+                if not accepted and time.monotonic() > no_start_deadline:
                     self._log_tiles(page, s, before)
                     raise TransientError(f"Flow không nhận lệnh Tạo: {NO_START_S}s sau khi bấm Tạo vẫn không có ô mới "
                                          "trong lưới (Tác nhân hỏi lại / hộp thoại che / mạng chậm?). Sẽ thử lại")
@@ -1060,16 +1067,26 @@ class FlowBrowserDriver:
                 log.info("Flow mở màn chỉnh sửa kết quả mới: %s", edit_id)
                 page.wait_for_timeout(1_500)
                 return edit_id
-            new = [m for m in self._media_ids(page, s, want) if m and m not in before]
+            # biết mọi ô có trước lúc bấm Tạo (kể cả ô mang tên file): so theo khoá, không lọc theo tên ô
+            all_before = probe.get("ids") if probe else None
+            by_key = all_before is not None
+            old = before | all_before if by_key else before
+            new = [m for m in self._media_ids(page, s, want, uploaded=by_key) if m and m not in old]
             if kind == "VIDEO" and new:
-                videos = [m for m in self._media_ids(page, s, "VIDEO") if m in new]
+                videos = [m for m in self._media_ids(page, s, "VIDEO", uploaded=by_key) if m in new]
                 new = videos or new
-            any_new = new or [m for m in self._media_ids(page, s) if m and m not in before]
+            any_new = new or [m for m in self._media_ids(page, s, uploaded=by_key) if m and m not in old]
             for m in new:
                 first_seen.setdefault(m, time.monotonic())
             if not logged and time.monotonic() - started > 180:
                 logged = True
                 self._log_tiles(page, s, before)   # chẩn đoán: chờ lâu mà chưa nhận kết quả
+            if not new and kind != "VIDEO" and probe and probe.get("chat") is not None:
+                # Tác nhân đôi khi trả ảnh kết quả vào khung chat mà KHÔNG thêm ô mới lên lưới: bấm vào ảnh đó như người dùng
+                seen, chat_id = self._chat_result(page, s, before, probe, chat_seen, chat_tried)
+                accepted = accepted or seen
+                if chat_id:
+                    return chat_id
             if new:
                 # video: thẻ <video> chỉ nạp file khi người dùng bấm xem -> ô mới đứng yên 30s, không còn % tiến độ = xong
                 settled = (kind == "VIDEO" and time.monotonic() - first_seen[new[0]] > 30
@@ -1106,8 +1123,97 @@ class FlowBrowserDriver:
         except Exception as e:  # noqa: BLE001 - chỉ là phép đo phụ, đọc lỗi thì bỏ qua kiểm tra (giữ cách chờ cũ)
             log.debug("Không chụp được đầu lưới trước khi bấm Tạo: %s", e)
             return None
-        return {"len": len(tiles), "top": tiles[0] if tiles else None, "labels": {t.label for t in tiles[:5]},
-                "prompt": prompt}
+        probe = {"len": len(tiles), "top": tiles[0] if tiles else None, "labels": {t.label for t in tiles[:5]},
+                 "prompt": prompt, "chat": None, "ids": None}
+        try:
+            # khoá của MỌI ô có trước lúc bấm Tạo, kể cả ô mang tên file (ảnh tham chiếu): ô nào ngoài tập này là kết quả mới
+            probe["ids"] = set(self._media_ids(page, s, uploaded=True) or [])
+        except Exception as e:  # noqa: BLE001
+            log.debug("Không đọc được khoá các ô trước khi bấm Tạo: %s", e)
+        try:
+            probe["chat"] = set(self._chat_images(page, s))
+        except Exception as e:  # noqa: BLE001
+            log.debug("Không đọc được ảnh trong khung chat của Tác nhân: %s", e)
+            probe["chat"] = None
+        return probe
+
+    # Ảnh lớn nằm NGOÀI các ô của lưới (khung chat của Tác nhân hiện ảnh kết quả ở đó). Bỏ ảnh nhỏ (chip @tag, avatar) và ảnh
+    # trùng với ảnh đang có trong lưới (ảnh tham chiếu người dùng gửi kèm trong chat).
+    _CHAT_IMGS_JS = """(card) => {
+        const inGrid = new Set([...document.querySelectorAll(card + ' img')].map(i => i.currentSrc || i.src));
+        return [...document.images].filter(img => {
+            if (img.closest(card) || !img.complete || img.naturalWidth < 150) return false;
+            const r = img.getBoundingClientRect();
+            return r.width >= 80 && r.height >= 60 && !inGrid.has(img.currentSrc || img.src);
+        }).map(img => img.currentSrc || img.src || '').filter(Boolean); }"""
+
+    _MARK_CHAT_IMG_JS = """([card, src]) => {
+        document.querySelectorAll('[data-afm-chatimg]').forEach(x => x.removeAttribute('data-afm-chatimg'));
+        const img = [...document.images].reverse().find(i => !i.closest(card) && (i.currentSrc || i.src) === src);
+        if (!img) return false;
+        img.setAttribute('data-afm-chatimg', '1');
+        return true; }"""
+
+    def _chat_images(self, page, s: dict) -> list[str]:
+        return page.evaluate(self._CHAT_IMGS_JS, s["result_card"]) or []
+
+    def _chat_result(self, page, s: dict, before: set, probe: dict, seen_at: dict, tried: set) -> tuple[bool, str | None]:
+        """
+        Ảnh kết quả MỚI trong khung chat của Tác nhân (chưa có lúc bấm Tạo) mà lưới không có ô mới: chờ vài giây cho lưới kịp
+        hiện ô, vẫn không có thì bấm vào ảnh để Flow mở /edit/<media id> (như người dùng bấm tay) rồi trả media id đó.
+        Trả về (đã thấy ảnh mới trong chat, media id hoặc None).
+        """
+        try:
+            fresh = [x for x in self._chat_images(page, s) if x not in probe["chat"] and x not in tried]
+        except Exception:  # noqa: BLE001
+            return False, None
+        if not fresh:
+            return False, None
+        src = fresh[-1]   # ảnh mới nhất ở cuối khung chat
+        if time.monotonic() - seen_at.setdefault(src, time.monotonic()) < CHAT_RESULT_WAIT_S:
+            return True, None
+        tried.add(src)
+        try:
+            if not page.evaluate(self._MARK_CHAT_IMG_JS, [s["result_card"], src]):
+                return True, None
+            log.info("Tác nhân trả ảnh vào khung chat, lưới không có ô mới: bấm vào ảnh để mở và tải")
+            self._step_hook("Tác nhân trả ảnh trong khung chat: bấm vào ảnh để tải")
+            img = page.locator("[data-afm-chatimg='1']").first
+            img.scroll_into_view_if_needed(timeout=5_000)
+            human_click(page, img, delay_before=self._pace.click_delay())
+            for _ in range(20):
+                page.wait_for_timeout(500)
+                mid = edit_media_id(page.url)
+                if mid:
+                    break
+            else:
+                mid = None
+        except PlaywrightError as e:
+            log.warning("Không bấm được ảnh trong khung chat của Tác nhân: %s", str(e)[:200])
+            return True, None
+        if mid and mid not in before and mid not in (probe.get("ids") or set()):
+            log.info("Có kết quả mới trên Flow (ảnh trong khung chat): %s", mid)
+            page.wait_for_timeout(1_000)
+            return True, mid
+        log.warning("Ảnh trong khung chat không phải kết quả mới (%s): quay lại lưới", mid or page.url)
+        try:
+            if mid:
+                page.goto(project_url(page.url), wait_until="domcontentloaded")
+                page.locator(s["result_card"]).first.wait_for(state="attached", timeout=15_000)
+            else:
+                page.keyboard.press("Escape")
+        except PlaywrightError:
+            pass
+        return True, None
+
+    def _step_hook(self, text: str):
+        """Báo bước lên bảng quản lý (bản extension ghi đè _step); bản trình duyệt riêng chỉ ghi log."""
+        step = getattr(self, "_step", None)
+        if callable(step):
+            try:
+                step(text)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _flow_started(self, page, s: dict, probe: dict) -> bool:
         """Đã có ô mới ở đầu lưới sau khi bấm Tạo (đang chạy, xong hay lỗi đều tính). Đọc lỗi thì coi như đã nhận (không báo nhầm)."""

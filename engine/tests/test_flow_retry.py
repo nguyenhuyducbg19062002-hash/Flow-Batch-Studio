@@ -26,7 +26,7 @@ def driver(tiles_seq, media_seq):
         return last["v"]
     d._error_tiles = error_tiles
     media = iter(media_seq)
-    d._media_ids = lambda page, s, want=None: next(media, [])
+    d._media_ids = lambda page, s, want=None, **k: next(media, [])
     d._media_ready = lambda page, m: True
     d._raise_if_error = lambda *a, **k: None
     d._retry_error_tile = mock.MagicMock(return_value=True)
