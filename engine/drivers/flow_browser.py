@@ -40,6 +40,9 @@ from . import pace as pace_mod
 FLOW_URL = "https://flow.google.com/"
 VIDEO_QUALITIES = ["1080p", "720p", "480p", "360p"]   # từ cao xuống thấp
 DEFAULT_VIDEO_QUALITY = "720p"   # phim không đặt chất lượng thì dùng 720p; người dùng đổi ở phần Phim
+# Bấm Tạo xong mà quá ngần này giây chưa có ô mới nào trong lưới (Tác nhân trả lời thì tính lại từ lúc đó) = Flow không nhận lệnh:
+# báo lỗi để cảnh thử lại, không đứng chờ hết thời gian chờ của cảnh. Tác nhân đã thấy mất ~85s mới trả lời (2026-11-06).
+NO_START_S = int(os.environ.get("AVS_FLOW_NO_START_S", "120"))
 log = logging.getLogger("flow")
 
 # Khóa bắt buộc phải cấu hình cho chế độ BACKGROUND (FOREGROUND chỉ cố gắng, thiếu thì người dùng tự làm tay)
@@ -1009,9 +1012,26 @@ class FlowBrowserDriver:
         configured = getattr(self, "_tile_retries", None)
         retries_left = max(0, int(configured if configured is not None else os.environ.get("AFM_FLOW_TILE_RETRIES", "10")))
         tries = 0
+        # Flow có NHẬN lệnh Tạo không (ô mới ở đầu lưới, kể cả ô đang chạy %)? Không nhận thì báo lỗi sau NO_START_S giây để cảnh
+        # thử lại, thay vì đứng chờ tới hết timeout_s (mặc định 15 phút) như đã gặp 2026-11-07 (CHAR-CLARA-3: bấm Tạo, ô prompt
+        # trống, không có ô mới nào). Ảnh chụp lưới trước khi bấm Tạo do generate() đặt; không có thì bỏ qua kiểm tra này.
+        probe, self._sent_probe = getattr(self, "_sent_probe", None), None
+        started = probe is None
+        no_start_deadline = time.monotonic() + NO_START_S
         while time.monotonic() < deadline:
             if should_stop():
                 raise Cancelled("Người dùng hủy job")
+            if not started:
+                started = self._flow_started(page, s, probe)
+                if not started and has_reply_sel:
+                    n = page.locator(reply_sel).count()
+                    if n != probe.setdefault("replies", replies):   # Tác nhân vừa trả lời: nó còn đang làm, chờ thêm
+                        probe["replies"] = n
+                        no_start_deadline = time.monotonic() + NO_START_S
+                if not started and time.monotonic() > no_start_deadline:
+                    self._log_tiles(page, s, before)
+                    raise TransientError(f"Flow không nhận lệnh Tạo: {NO_START_S}s sau khi bấm Tạo vẫn không có ô mới "
+                                         "trong lưới (Tác nhân hỏi lại / hộp thoại che / mạng chậm?). Sẽ thử lại")
             # Ô lỗi trước (chữ "hoạt động bất thường" nằm ngay trên ô): bấm ↻ thử lại, KHÔNG để bước kiểm tra chữ chung của
             # trang báo lỗi trước. Hết lượt thử lại mới báo (tài khoản nghỉ theo Cài đặt).
             new_failed = list((Counter(self._error_tiles(page, s)) - failed_before).elements())
@@ -1071,12 +1091,40 @@ class FlowBrowserDriver:
                     self._send(page, s, auto_reply)
                     nudges += 1
                     replies, idle_since = page.locator(reply_sel).count(), None
+                    no_start_deadline = time.monotonic() + NO_START_S   # vừa trả lời Tác nhân: cho Flow thêm thời gian bắt đầu
             if time.monotonic() - last_log > 60:
                 log.info("Đang chờ Flow tạo...")
                 last_log = time.monotonic()
             page.wait_for_timeout(1_500)
         self._log_tiles(page, s, before)
         raise TransientError(f"Quá {timeout_s}s chưa có kết quả")
+
+    def _sent_snapshot(self, page, s: dict, prompt: str):
+        """Ảnh chụp đầu lưới ngay TRƯỚC khi bấm Tạo (để _wait_result biết Flow có nhận lệnh không). None nếu không đọc được."""
+        try:
+            tiles = _SessionOps(self, page, s).generated_tiles()
+        except Exception as e:  # noqa: BLE001 - chỉ là phép đo phụ, đọc lỗi thì bỏ qua kiểm tra (giữ cách chờ cũ)
+            log.debug("Không chụp được đầu lưới trước khi bấm Tạo: %s", e)
+            return None
+        return {"len": len(tiles), "top": tiles[0] if tiles else None, "labels": {t.label for t in tiles[:5]},
+                "prompt": prompt}
+
+    def _flow_started(self, page, s: dict, probe: dict) -> bool:
+        """Đã có ô mới ở đầu lưới sau khi bấm Tạo (đang chạy, xong hay lỗi đều tính). Đọc lỗi thì coi như đã nhận (không báo nhầm)."""
+        try:
+            ops = _SessionOps(self, page, s)
+            tiles = ops.generated_tiles()
+            if edit_media_id(page.url):
+                return True
+            if ops._accepted(tiles, probe["len"], probe["top"], probe["labels"], probe["prompt"]):
+                return True
+            top = tiles[0] if tiles else None
+            old = probe["top"]
+            # ô trên cùng đổi (khác khoá / nhãn) và đang chạy, đã xong hay lỗi: là ô của lệnh vừa gửi
+            return top is not None and (old is None or (top.key, top.label) != (old.key, old.label)) and (
+                top.pct is not None or top.ready or top.failed or top.key is not None)
+        except Exception:  # noqa: BLE001 - đọc lỗi thì coi như Flow đã nhận (không báo lỗi nhầm)
+            return True
 
     # Ô Flow tạo HỎNG (đã thấy 2026-11-06 trên ô video: <flow-error-tile>, không có data-media-id / ảnh thu nhỏ nên
     # _media_ids không bao giờ thấy nó): nhãn + chữ trên ô, để so với trước khi bấm Tạo.
@@ -1370,6 +1418,7 @@ class FlowBrowserDriver:
     def generate(self, job: dict, should_stop) -> GenerationResult:
         self._pace = pace_mod.Pace(pace_mod.factor(job))   # nhịp thao tác như người thật (Cài đặt → Tốc độ thao tác)
         self._tile_retries = job.get("errorTileRetries")   # Cài đặt → số lần bấm ↻ trên ô lỗi
+        self._sent_probe = None   # không dùng lại ảnh chụp lưới của cảnh trước (cảnh đó lỗi giữa chừng)
         s = self._sel(BACKGROUND_KEYS)
         staging = Path(job["stagingDir"])
         staging.mkdir(parents=True, exist_ok=True)
@@ -1418,6 +1467,7 @@ class FlowBrowserDriver:
                             self._check_env_before_send(page, s, job, env_key)
                         self._save_pending(page, job, before)
                         self._pace.pause(page, 1.0, 2.5)   # đọc lại prompt rồi mới bấm Tạo
+                        self._sent_probe = self._sent_snapshot(page, s, job["prompt"])
                         send_prompt(page, s)
                         with tm.step("cho_google"):
                             media_id = self._wait_result(page, s, before, errors, should_stop, job["timeoutSeconds"], job["kind"])

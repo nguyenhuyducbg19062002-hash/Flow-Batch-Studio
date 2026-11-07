@@ -26,12 +26,15 @@ AVS_FLOW_MIN_GAP_S giây; Flow báo "unusual activity" thì ngừng gửi lệnh
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import socket
 import threading
 import time
+import re
+import tempfile
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -68,6 +71,7 @@ class _State:
         self.cdp_client = None                    # Playwright đang nối cổng CDP
         self.cdp_pending: dict[str, tuple] = {}   # id lệnh gửi extension -> (id lệnh của Playwright, sessionId)
         self.downloads: list[dict] = []           # file Chrome tải xong gần đây (mới nhất ở cuối)
+        self.xfers: dict[str, dict] = {}          # file extension đang gửi thẳng (download_data), chưa đủ gói
 
 
 S = _State()
@@ -111,6 +115,8 @@ async def _ws_handler(ws):
                 d["at"] = time.time()
                 S.downloads = (S.downloads + [d])[-50:]
                 log.info("Chrome tải xong: %s", d.get("filename"))
+            elif t == "download_data":
+                _on_download_data(msg)
             elif msg.get("id") in S.cdp_pending:
                 pw_id, session = S.cdp_pending.pop(msg["id"])
                 reply = {"id": pw_id}
@@ -136,6 +142,77 @@ async def _ws_handler(ws):
             S.pending.clear()
             if S.cdp_client is not None:
                 await S.cdp_client.close(1001, "extension disconnected")
+
+
+# ── file extension gửi thẳng (Chrome bật "Hỏi vị trí lưu": không để Chrome tải, khỏi hộp Save As) ─────────────
+
+_MIME_EXT = {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif",
+             "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov"}
+
+
+def download_dir():
+    """Nơi ghi file extension gửi thẳng: thư mục Downloads của người dùng (như khi Chrome tự tải)."""
+    from pathlib import Path
+    for d in (os.environ.get("AVS_FLOW_DOWNLOAD_DIR"), str(Path.home() / "Downloads")):
+        if d:
+            try:
+                Path(d).mkdir(parents=True, exist_ok=True)
+                return Path(d)
+            except OSError:
+                pass
+    return Path(tempfile.gettempdir())
+
+
+def _safe_name(name: str, mime: str) -> str:
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", (name or "").strip()).strip(" .")
+    stem, dot, ext = name.rpartition(".")
+    if not dot or not stem or not re.fullmatch(r"[A-Za-z0-9]{1,5}", ext):
+        name = (name or f"flow-{int(time.time())}") + _MIME_EXT.get((mime or "").lower(), "")
+    return name[:150]
+
+
+def _unique_path(folder, name: str):
+    target = folder / name
+    stem, suffix = target.stem, target.suffix
+    n = 1
+    while target.exists():
+        target = folder / f"{stem} ({n}){suffix}"
+        n += 1
+    return target
+
+
+def _on_download_data(msg: dict) -> None:
+    """Gom các gói base64 của một file; đủ gói thì ghi ra thư mục Downloads và báo như một lượt Chrome tải xong."""
+    xid = str(msg.get("xferId") or "")
+    try:
+        seq, total = int(msg.get("seq")), int(msg.get("total"))
+    except (TypeError, ValueError):
+        return
+    if not xid or total < 1 or not 0 <= seq < total:
+        return
+    now = time.time()
+    for k in [k for k, v in S.xfers.items() if now - v["at"] > 600]:   # gói dở dang quá lâu (mất kết nối giữa chừng)
+        S.xfers.pop(k, None)
+    x = S.xfers.setdefault(xid, {"parts": {}, "total": total, "name": msg.get("name") or "", "mime": msg.get("mime") or "",
+                                 "at": now})
+    x["parts"][seq] = msg.get("b64") or ""
+    if len(x["parts"]) < x["total"]:
+        return
+    S.xfers.pop(xid, None)
+    try:
+        data = base64.b64decode("".join(x["parts"][i] for i in range(x["total"])))
+        if not data:
+            raise ValueError("file rỗng")
+        target = _unique_path(download_dir(), _safe_name(x["name"], x["mime"]))
+        part = target.with_name(target.name + ".part")
+        part.write_bytes(data)
+        os.replace(part, target)
+    except (OSError, ValueError, KeyError) as e:
+        log.warning("Không ghi được file extension gửi thẳng (%s): %s", x["name"], e)
+        return
+    S.downloads = (S.downloads + [{"filename": str(target), "url": None, "mime": x["mime"], "fileSize": len(data),
+                                   "at": time.time()}])[-50:]
+    log.info("Extension gửi thẳng file (không qua hộp Lưu của Chrome): %s", target)
 
 
 async def _send(params: dict, timeout: float, method: str = "batch_rpc") -> dict:

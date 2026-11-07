@@ -299,62 +299,119 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 });
 
 // ── tải không hỏi "Lưu" ────────────────────────────────────────────────────
-// Chrome bật "Hỏi vị trí lưu từng tệp" (hay gặp trên Windows 10) thì mỗi lần Flow tải file lại hiện hộp Lưu, phải bấm tay.
-// Bắt lượt tải của trang Flow ngay lúc Chrome xin tên file (TRƯỚC khi hiện hộp Lưu), hủy nó, rồi extension tự tải lại
-// cùng file với saveAs:false (không bao giờ hỏi). File vẫn về thư mục Downloads như cũ, app nhận như cũ.
+// Chrome bật "Hỏi vị trí lưu từng tệp" (hay gặp trên Windows 10) thì mỗi lần Flow tải file lại hiện hộp Lưu, app chờ mãi
+// không thấy file. chrome.downloads.download({saveAs:false}) KHÔNG tắt được hộp này (Chrome vẫn theo cài đặt "Hỏi vị trí
+// lưu"), nên bản 0.3.1 vẫn bị hỏi. Từ 0.3.2: bắt lượt tải của trang Flow ngay lúc Chrome xin tên file (TRƯỚC khi hiện hộp
+// Lưu), extension tự đọc nội dung file rồi gửi thẳng cho app qua WebSocket; app ghi file vào thư mục Downloads. Lượt tải
+// của Chrome bị hủy nên không có hộp Lưu nào. Chưa nối app / không đọc được file thì để Chrome tải như bình thường.
 const FLOW_DL = /(^|\.)(flow\.google\.com|labs\.google|flow-content\.google|googleusercontent\.com|storage\.googleapis\.com)(\/|:|$)/;
+const XFER_CHUNK = 2 * 1024 * 1024;   // số ký tự base64 mỗi gói gửi app (bội số của 4)
 
 function hostOf(u) {
   try { return new URL(u).hostname; } catch { return ''; }
 }
 
-async function blobToDataUrl(blobUrl) {
-  // blob: chỉ đọc được trong đúng trang đã tạo nó: tìm tab cùng nguồn (tab Flow)
+function bytesToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+// Đọc file trong tab Flow (blob: chỉ đọc được trong đúng trang đã tạo nó; https: dùng cookie / CORS của trang) -> data URL
+async function readInTab(url) {
   let tab = null;
-  try {
-    const origin = new URL(blobUrl.slice(5)).origin;
-    tab = (await chrome.tabs.query({ url: origin + '/*' }))[0] || null;
-  } catch {}
+  if (url.startsWith('blob:')) {
+    try {
+      const origin = new URL(url.slice(5)).origin;
+      tab = (await chrome.tabs.query({ url: origin + '/*' }))[0] || null;
+    } catch {}
+  }
   if (!tab) tab = await pickFlowTab();
   if (!tab) throw new Error('NO_FLOW_TAB');
   const [res] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    args: [blobUrl],
+    args: [url],
     func: async (u) => {
-      const b = await (await fetch(u)).blob();
+      const r = await fetch(u, { credentials: 'include' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const b = await r.blob();
       return await new Promise((ok, bad) => {
-        const r = new FileReader();
-        r.onload = () => ok(r.result);
-        r.onerror = () => bad(String(r.error));
-        r.readAsDataURL(b);
+        const fr = new FileReader();
+        fr.onload = () => ok(fr.result);
+        fr.onerror = () => bad(String(fr.error));
+        fr.readAsDataURL(b);
       });
     },
   });
-  if (!res?.result) throw new Error('blob rỗng');
+  if (!res?.result) throw new Error('không đọc được file trong tab Flow');
   return res.result;
+}
+
+// Nội dung file: { mime, b64 }. https: extension tự tải (có cookie), không được thì đọc trong tab Flow.
+async function fetchFileBase64(url) {
+  let dataUrl = null;
+  if (url.startsWith('data:')) dataUrl = url;
+  else if (url.startsWith('blob:')) dataUrl = await readInTab(url);
+  else {
+    try {
+      const r = await fetch(url, { credentials: 'include' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return { mime: (r.headers.get('content-type') || '').split(';')[0], b64: bytesToBase64(await r.arrayBuffer()) };
+    } catch {
+      dataUrl = await readInTab(url);
+    }
+  }
+  const comma = dataUrl.indexOf(',');
+  const head = dataUrl.slice(5, comma);
+  const mime = head.split(';')[0];
+  if (/;base64$/i.test(head)) return { mime, b64: dataUrl.slice(comma + 1) };
+  return { mime, b64: bytesToBase64(new TextEncoder().encode(decodeURIComponent(dataUrl.slice(comma + 1)))) };
+}
+
+// Gửi file cho app theo từng gói; app ghi xong file sẽ coi như một lượt tải bình thường.
+function sendFileToApp(name, mime, b64) {
+  const xferId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const total = Math.max(1, Math.ceil(b64.length / XFER_CHUNK));
+  for (let seq = 0; seq < total; seq++) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('mất kết nối app');
+    send({ type: 'download_data', xferId, name, mime, seq, total, b64: b64.slice(seq * XFER_CHUNK, (seq + 1) * XFER_CHUNK) });
+  }
 }
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   const url = item.finalUrl || item.url || '';
   const fromFlow = FLOW_DL.test(hostOf(item.referrer || '')) || FLOW_DL.test(hostOf(url))
     || (url.startsWith('blob:https://') && FLOW_DL.test(hostOf(url.slice(5))));
-  if (item.byExtensionId || !fromFlow || !/^(https?:|blob:|data:)/.test(url)) {
+  const appOn = ws && ws.readyState === WebSocket.OPEN;
+  if (item.byExtensionId || !fromFlow || !appOn || !/^(https?:|blob:|data:)/.test(url)) {
     suggest();
     return;
   }
-  const name = (item.filename || '').split(/[\/]/).pop() || undefined;
+  const name = (item.filename || '').split(/[\\/]/).pop() || '';
   (async () => {
+    let file;
     try {
-      await chrome.downloads.cancel(item.id);
-      chrome.downloads.erase({ id: item.id }).catch(() => {});
-      const src = url.startsWith('blob:') ? await blobToDataUrl(url) : url;
-      await chrome.downloads.download({ url: src, filename: name, saveAs: false, conflictAction: 'uniquify' });
+      file = await fetchFileBase64(url);   // lượt tải của Chrome vẫn đứng chờ tên file trong lúc này: chưa có hộp Lưu
+      if (!file.b64) throw new Error('file rỗng');
     } catch (e) {
-      addLog(`Không tự tải được ${name || 'file'} (${e?.message || e}): bấm Lưu trên hộp thoại của Chrome`, 'warn');
-      suggest();   // để Chrome tải như bình thường
+      addLog(`Không tự đọc được ${name || 'file'} (${e?.message || e}): để Chrome tải như bình thường`, 'warn');
+      suggest();
+      return;
+    }
+    try { await chrome.downloads.cancel(item.id); } catch {}
+    chrome.downloads.erase({ id: item.id }).catch(() => {});
+    try {
+      sendFileToApp(name, file.mime || item.mime || '', file.b64);
+      addLog(`Đã gửi ${name || 'file'} thẳng cho app (không qua hộp Lưu của Chrome)`, 'info');
+    } catch (e) {
+      // lượt tải của Chrome đã hủy: tải lại bằng Chrome (có thể bị hỏi vị trí lưu)
+      addLog(`Không gửi được ${name || 'file'} cho app (${e?.message || e}): tải lại bằng Chrome`, 'warn');
+      chrome.downloads.download({ url: `data:${file.mime || 'application/octet-stream'};base64,${file.b64}`,
+                                  filename: name || undefined, conflictAction: 'uniquify' }).catch(() => {});
     }
   })();
-  return true;   // trả lời sau (không gọi suggest khi đã hủy và tải lại)
+  return true;   // trả lời sau (không gọi suggest khi đã tự lấy file)
 });
 
 // ── báo app mỗi file tải xong (app chép file từ thư mục Downloads vào phim) ───

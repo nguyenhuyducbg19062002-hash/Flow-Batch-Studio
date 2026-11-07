@@ -54,7 +54,7 @@ Yêu cầu: Windows 10/11 64-bit, Google Chrome, tài khoản Google dùng đư�
 
 - Chrome -> Cài đặt -> Tải xuống: nên TẮT "Hỏi vị trí lưu từng tệp trước khi tải xuống". Nếu vẫn bật (hay gặp
 
-  trên Windows 10), extension 0.3.1 trở lên tự lưu file, không hiện hộp "Save As" nữa.
+  trên Windows 10), extension 0.3.2 trở lên tự gửi file thẳng cho app (lưu vào thư mục Downloads), không hiện hộp "Save As" nữa. Đang dùng bản cũ hơn: chép thư mục extension mới đè lên rồi bấm nút tải lại (↻) của extension trong chrome://extensions.
 
 - Chrome hỏi "flow.google.com muốn tải nhiều tệp" (Download multiple files): bấm "Cho phép" (Allow) một lần.
 
